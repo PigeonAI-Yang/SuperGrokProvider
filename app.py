@@ -143,8 +143,8 @@ def integration_configs(
             '          "modalities": {"input": ["text"], "output": ["text"]},',
             '          "reasoning": {',
             '            "enabled": true,',
-            '            "variants": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],',
-            '            "defaultVariant": "medium"',
+            '            "variants": ["low", "medium", "high"],',
+            '            "defaultVariant": "high"',
             "          }",
             "        }",
             "      }",
@@ -157,7 +157,7 @@ def integration_configs(
         "zcode": {
             "label": "Zcode Desktop",
             "filename": r"%USERPROFILE%\.zcode\v2\config.json",
-            "note": f"将 provider.{provider_key} 合并进现有 JSON；推理按钮使用 Zcode 当前识别的 variants 契约。",
+            "note": f"将 provider.{provider_key} 合并进现有 JSON；推理按钮使用 xAI 官方 low / medium / high 档位。",
             "content": zcode_content,
         },
         "hermes": {
