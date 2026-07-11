@@ -19,6 +19,7 @@ Delivered
 - Independent launcher and backend singleton locks prevent duplicate windows, tray hosts and listeners.
 - The top-left brand and account workspace now share the same 1180px shell gutter.
 - ZCODE, GROK BUILD and HERMES now have independent Provider keys and Agent-level route locks. Each Agent supports ordered account-group fallback, isolation toggles, reordering, create/rename/delete and cross-Agent account moves.
+- Account rows now open a keyboard-accessible details drawer; account names can be validated and persisted without reauthorization.
 
 ## Current Loop
 

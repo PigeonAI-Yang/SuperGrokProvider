@@ -430,6 +430,27 @@ class ProviderRotationTests(unittest.TestCase):
             self.assertTrue(json.load(response)["deleted"])
         self.assertIsNone(self.store.get(extra["id"]))
 
+    def test_management_rename_account_persists_and_rejects_duplicate(self):
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/accounts/{self.first['id']}/rename",
+            data=json.dumps({"name": "重新命名"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            self.assertEqual(json.load(response)["name"], "重新命名")
+        self.assertEqual(self.store.get(self.first["id"])["name"], "重新命名")
+
+        duplicate = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/accounts/{self.first['id']}/rename",
+            data=json.dumps({"name": "第二个"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(duplicate, timeout=5)
+        self.assertEqual(error.exception.code, 400)
+
     def test_management_agent_and_group_lifecycle(self):
         create = urllib.request.Request(
             f"http://127.0.0.1:{self.server.server_port}/api/agents",

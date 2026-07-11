@@ -670,6 +670,24 @@ class AccountStore:
             self._write(data)
             return self._public(account)
 
+    def rename_account(self, account_id: str, name: str) -> dict:
+        name = name.strip()
+        if not name or len(name) > 60:
+            raise ValueError("账号名称必须为 1-60 个字符")
+        with self.lock:
+            data = self._read()
+            account = next((item for item in data["accounts"] if item["id"] == account_id), None)
+            if not account:
+                raise KeyError(account_id)
+            if any(
+                item["id"] != account_id and item["name"].casefold() == name.casefold()
+                for item in data["accounts"]
+            ):
+                raise ValueError("账号名称已存在")
+            account["name"] = name
+            self._write(data)
+            return self._public(account)
+
     def select(self, account_id: str, group_id: str | None = None) -> dict:
         with self.lock:
             data = self._read()
@@ -1234,7 +1252,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.app.auth.start(account["id"])
                 return self._json(202, account)
             match = re.fullmatch(
-                r"/api/accounts/([0-9a-f]{32})/(authorize|select|reset|toggle|usage|membership|move)",
+                r"/api/accounts/([0-9a-f]{32})/(authorize|select|reset|toggle|usage|membership|move|rename)",
                 path,
             )
             agent_match = re.fullmatch(r"/api/agents/([0-9a-z-]{1,64})/rename", path)
@@ -1268,6 +1286,8 @@ class Handler(SimpleHTTPRequestHandler):
             if action == "move":
                 with self.app.account_lock(account_id):
                     return self._json(200, self.app.store.move(account_id, str(body.get("group_id", ""))))
+            if action == "rename":
+                return self._json(200, self.app.store.rename_account(account_id, str(body.get("name", ""))))
             if action == "reset":
                 return self._json(
                     200,

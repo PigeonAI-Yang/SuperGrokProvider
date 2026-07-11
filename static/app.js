@@ -3,7 +3,7 @@ const PAGE_SIZE = 4;
 const state = {
   accounts: [], agents: [], agentId: "zcode", groups: [], groupId: null, moveTargets: [],
   activeId: null, config: null,
-  authId: null, deleteTarget: null, moveId: null, poll: null, page: 0,
+  authId: null, accountDrawerId: null, deleteTarget: null, moveId: null, poll: null, page: 0,
   integration: "zcode", drawerTrigger: "#open-details",
 };
 
@@ -162,6 +162,10 @@ function renderAccounts() {
 
     const identity = document.createElement("div");
     identity.className = "account-identity";
+    identity.tabIndex = 0;
+    identity.setAttribute("role", "button");
+    identity.setAttribute("aria-label", `打开 ${account.name} 的账号详情`);
+    identity.dataset.accountId = account.id;
     const titleLine = document.createElement("div");
     titleLine.className = "account-title-line";
     const title = document.createElement("h3");
@@ -361,6 +365,25 @@ function openMoveDialog(id) {
   $("#move-group").focus();
 }
 
+function openAccountDrawer(id) {
+  const account = state.accounts.find((item) => item.id === id);
+  if (!account) return toast("账号已不存在，请刷新后重试", true);
+  state.accountDrawerId = id;
+  state.drawerTrigger = `[data-account-id="${id}"]`;
+  hideDrawers();
+  $("#drawer-backdrop").hidden = false;
+  $("#account-drawer").hidden = false;
+  $("#account-drawer-title").textContent = account.name;
+  $("#rename-account-name").value = account.name;
+  $("#account-drawer-email").textContent = account.email || "等待官方账号信息";
+  $("#account-drawer-membership").textContent = membershipNames[account.membership_type] || membershipNames.unknown;
+  const group = state.moveTargets.find((item) => item.id === account.group_id);
+  $("#account-drawer-location").textContent = group ? `${group.agent_name} / ${group.name}` : "未知";
+  $("#account-drawer-created").textContent = addedAtLabel(account.created_at).replace("添加于 ", "");
+  $("#rename-account-error").hidden = true;
+  $("#rename-account-name").focus();
+}
+
 async function mutate(path, method = "POST", body = {}) {
   const options = { method };
   if (method !== "DELETE") options.body = JSON.stringify(body);
@@ -386,6 +409,17 @@ $("#group-select").addEventListener("change", async (event) => {
 });
 $("#page-prev").addEventListener("click", () => { state.page -= 1; renderAccounts(); });
 $("#page-next").addEventListener("click", () => { state.page += 1; renderAccounts(); });
+$("#account-list").addEventListener("click", (event) => {
+  const identity = event.target.closest("[data-account-id]");
+  if (identity) openAccountDrawer(identity.dataset.accountId);
+});
+$("#account-list").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const identity = event.target.closest("[data-account-id]");
+  if (!identity) return;
+  event.preventDefault();
+  openAccountDrawer(identity.dataset.accountId);
+});
 $("#open-details").addEventListener("click", () => {
   state.drawerTrigger = "#open-details";
   $("#drawer-backdrop").hidden = false;
@@ -404,6 +438,7 @@ function hideDrawers() {
   $("#details-drawer").hidden = true;
   $("#integration-drawer").hidden = true;
   $("#groups-drawer").hidden = true;
+  $("#account-drawer").hidden = true;
 }
 function closeDetails() {
   hideDrawers();
@@ -411,6 +446,7 @@ function closeDetails() {
 }
 $("#close-details").addEventListener("click", closeDetails);
 $("#close-groups").addEventListener("click", closeDetails);
+$("#close-account-drawer").addEventListener("click", closeDetails);
 $("#drawer-backdrop").addEventListener("click", closeDetails);
 $("#open-integrations").addEventListener("click", () => {
   $("#details-drawer").hidden = true;
@@ -432,7 +468,7 @@ document.querySelectorAll("[data-integration]").forEach((button) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && (
-    !$("#details-drawer").hidden || !$("#integration-drawer").hidden || !$("#groups-drawer").hidden
+    !$("#details-drawer").hidden || !$("#integration-drawer").hidden || !$("#groups-drawer").hidden || !$("#account-drawer").hidden
   )) closeDetails();
 });
 document.addEventListener("click", async (event) => {
@@ -566,6 +602,26 @@ $("#rename-group-form").addEventListener("submit", async (event) => {
   }
 });
 $("#delete-group").addEventListener("click", openGroupDeleteDialog);
+
+$("#rename-account-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.accountDrawerId) return;
+  const button = event.submitter;
+  const errorNode = $("#rename-account-error");
+  button.disabled = true;
+  errorNode.hidden = true;
+  try {
+    await mutate(`/api/accounts/${state.accountDrawerId}/rename`, "POST", { name: $("#rename-account-name").value });
+    const account = state.accounts.find((item) => item.id === state.accountDrawerId);
+    $("#account-drawer-title").textContent = account?.name || "账号详情";
+    toast("账号名称已更新");
+  } catch (error) {
+    errorNode.textContent = error.message;
+    errorNode.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
 $("#toggle-group").addEventListener("click", async () => {
   try {
     await mutate(`/api/groups/${state.groupId}/toggle`);

@@ -179,6 +179,30 @@
     </section>
   </aside>
 
+  <aside id="account-drawer" class="details-drawer" role="dialog" aria-modal="true" aria-labelledby="account-drawer-title" hidden>
+    <div class="drawer-heading">
+      <div>
+        <p class="kicker">Account details</p>
+        <h2 id="account-drawer-title">账号详情</h2>
+      </div>
+      <button type="button" id="close-account-drawer">关闭</button>
+    </div>
+    <section class="group-section" aria-labelledby="rename-account-title">
+      <p class="drawer-label" id="rename-account-title">账号名称</p>
+      <form id="rename-account-form" class="inline-form">
+        <input id="rename-account-name" maxlength="60" required aria-label="账号名称">
+        <button class="primary" type="submit">保存</button>
+      </form>
+      <p id="rename-account-error" class="inline-error" role="alert" hidden></p>
+    </section>
+    <dl class="detail-list">
+      <div><dt>登录邮箱</dt><dd id="account-drawer-email"></dd></div>
+      <div><dt>会员类型</dt><dd id="account-drawer-membership"></dd></div>
+      <div><dt>所属位置</dt><dd id="account-drawer-location"></dd></div>
+      <div><dt>添加时间</dt><dd id="account-drawer-created"></dd></div>
+    </dl>
+  </aside>
+
   <aside id="details-drawer" class="details-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
     <div class="drawer-heading">
       <div>

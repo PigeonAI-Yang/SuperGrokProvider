@@ -5,6 +5,7 @@
 - Add any number of named accounts.
 - Authorization uses `grok login --device-auth` under an isolated `GROK_HOME`.
 - Show official URL and one-time code while pending.
+- Open account details from the account row; rename with inline validation and persistent failure feedback.
 - Select active account, enable/disable, reset exhausted/error state and delete.
 - Show at most four accounts per page so the fixed-height window never needs an internal list scrollbar.
 - Filter the account list by the selected Agent and group, and support moving an account to any group.

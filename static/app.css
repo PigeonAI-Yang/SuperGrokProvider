@@ -209,7 +209,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 }
 .account-row:last-child { border-bottom: 0; }
 .account-row.active { box-shadow: inset 3px 0 var(--accent); background: rgb(112 214 160 / 0.035); }
-.account-identity { min-width: 0; }
+.account-identity { min-width: 0; cursor: pointer; border-radius: 8px; }
+.account-identity:hover h3 { color: var(--accent); }
+.account-identity:focus-visible { outline: 3px solid rgb(112 214 160 / 0.35); outline-offset: 3px; }
 .account-title-line { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 7px; }
 .account-title-line h3 { margin: 0; font-size: 16px; }
 .account-email { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }

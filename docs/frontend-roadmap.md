@@ -11,3 +11,4 @@
 - [x] Keep the active marker synchronized with the account that handled the latest successful Provider request.
 - [x] Align the top-left brand with the account workspace shell.
 - [x] Add Agent pages with per-Agent Provider keys, ordered group fallback and group isolation controls.
+- [x] Add a keyboard-accessible account details drawer with persistent account renaming.

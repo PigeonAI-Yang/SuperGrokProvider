@@ -4,7 +4,7 @@
 
 | Module | Responsibility | Route |
 | --- | --- | --- |
-| Accounts | Add, authorize, select, reset and delete isolated Grok accounts | `/api/accounts` |
+| Accounts | Add, authorize, rename, select, reset and delete isolated Grok accounts | `/api/accounts`, `/api/accounts/{id}/rename` |
 | Agents | Own Provider keys, route locks and ordered account-group queues | `/api/agents`, `/api/config?agent_id=...` |
 | Groups | Create, rename, isolate, reorder and delete routing pools; move accounts between them | `/api/groups`, `/api/accounts/{id}/move` |
 | Authorization | Run official `grok login --device-auth` and expose temporary progress | `/api/accounts/{id}/authorize` |
