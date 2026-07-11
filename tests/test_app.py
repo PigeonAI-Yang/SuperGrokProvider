@@ -72,6 +72,12 @@ class IntegrationConfigTests(unittest.TestCase):
         self.assertNotIn("grok-composer", hermes + grok_build + self.configs["zcode"]["content"])
 
 
+class ServerStartupTests(unittest.TestCase):
+    def test_server_rejects_non_loopback_binding_before_startup(self):
+        with self.assertRaisesRegex(RuntimeError, "localhost"):
+            app.create_router_server("0.0.0.0", 8742)
+
+
 class StoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

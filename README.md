@@ -4,19 +4,34 @@
 
 ## 启动
 
-前提：Windows 已安装官方 `grok` CLI，且 `grok --version` 可运行。
+前提：Windows 已安装官方 `grok` CLI，且 `grok --version` 可运行。桌面版使用系统 WebView2 Runtime，不再启动 Chrome 或 Edge App 模式。
+
+直接运行打包产物：
+
+```powershell
+.\dist\SuperGrokRouter.exe
+```
+
+从源码启动桌面版：
 
 ```powershell
 cd C:\path\to\supergrok-router
 .\start.ps1
 ```
 
-启动脚本会用 Chrome 或 Edge 的 App 模式打开一个 1280×720 本地工具窗口。最小化窗口会隐藏到系统托盘；双击托盘图标或点击“打开”即可恢复，点击“退出”会同时关闭窗口和后台 Provider。
+应用使用固定 1280×720 原生窗口。最小化窗口会隐藏到系统托盘；双击托盘图标或点击“打开”即可恢复，点击“退出”会同时关闭窗口和后台 Provider。
 
-启动器和后端各有独立的 Windows 单例锁；重复双击不会再创建第二个窗口、托盘宿主或端口监听进程。
+桌面宿主和后端各有独立的 Windows 单例锁；重复双击会恢复现有窗口，不会再创建第二个实例或端口监听进程。
 
 应用窗口和系统托盘使用 `static/app-icon.png` / `static/app-icon.ico` 中的 SG 图标。
-启动器会通过 Windows 原生窗口消息同步设置任务栏的大、小图标，不依赖 Chrome 的 favicon 缓存。
+
+## 构建桌面版
+
+```powershell
+.\build.ps1
+```
+
+构建脚本使用隔离的 `.venv-build` 环境，生成无控制台、包含静态资源和应用图标的 `dist\SuperGrokRouter.exe`。
 
 如果只想启动服务、不打开窗口：
 

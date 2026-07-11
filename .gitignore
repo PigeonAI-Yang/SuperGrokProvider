@@ -4,6 +4,10 @@ __pycache__/
 work/
 .ai/
 .venv/
+.venv-build/
+build/
+dist/
+*.spec
 .env
 .env.*
 state.json

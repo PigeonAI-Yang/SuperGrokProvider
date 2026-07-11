@@ -1838,6 +1838,38 @@ class Handler(SimpleHTTPRequestHandler):
                 upstream_response.close()
 
 
+def create_router_server(
+    host: str = "127.0.0.1",
+    port: int = 8742,
+    data_dir: Path | None = None,
+    upstream: str | None = None,
+) -> tuple[RouterServer, object]:
+    if host not in {"127.0.0.1", "localhost"}:
+        raise RuntimeError("安全限制：当前版本只能监听 localhost")
+    singleton = acquire_singleton_mutex("Local\\SuperGrokRouter.Backend")
+    if singleton is False:
+        raise RuntimeError("SuperGrok Router 已在运行")
+    try:
+        grok_command = shutil.which("grok")
+        if not grok_command:
+            raise RuntimeError("未找到官方 Grok Build CLI，请先安装并确保 grok 在 PATH 中")
+        store = AccountStore(data_dir or default_data_dir())
+        auth = AuthorizationManager(store, grok_command)
+        version_result = subprocess.run(
+            [grok_command, "--version"], capture_output=True, text=True, timeout=10, check=False
+        )
+        version_match = re.search(r"\d+\.\d+\.\d+", version_result.stdout + version_result.stderr)
+        client_version = version_match.group(0) if version_match else "0.0.0"
+        usage = UsageMonitor(store, auth, client_version)
+        server = RouterServer(
+            (host, port), Handler, store, auth, upstream or os.environ.get("SGR_UPSTREAM", "https://api.x.ai"), usage=usage
+        )
+        return server, singleton
+    except Exception:
+        release_singleton_mutex(singleton)
+        raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local multi-account SuperGrok provider")
     parser.add_argument("--host", default="127.0.0.1")
@@ -1845,33 +1877,19 @@ def main() -> None:
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
     parser.add_argument("--upstream", default=os.environ.get("SGR_UPSTREAM", "https://api.x.ai"))
     args = parser.parse_args()
-    if args.host not in {"127.0.0.1", "localhost"}:
-        raise SystemExit("安全限制：当前版本只能监听 localhost")
-    singleton = acquire_singleton_mutex("Local\\SuperGrokRouter.Backend")
-    if singleton is False:
-        raise SystemExit("SuperGrok Router 已在运行")
-    grok_command = shutil.which("grok")
-    if not grok_command:
-        release_singleton_mutex(singleton)
-        raise SystemExit("未找到官方 Grok Build CLI，请先安装并确保 grok 在 PATH 中")
-    store = AccountStore(args.data_dir)
-    auth = AuthorizationManager(store, grok_command)
-    version_result = subprocess.run(
-        [grok_command, "--version"], capture_output=True, text=True, timeout=10, check=False
-    )
-    version_match = re.search(r"\d+\.\d+\.\d+", version_result.stdout + version_result.stderr)
-    client_version = version_match.group(0) if version_match else "0.0.0"
-    usage = UsageMonitor(store, auth, client_version)
-    server = RouterServer((args.host, args.port), Handler, store, auth, args.upstream, usage=usage)
+    try:
+        server, singleton = create_router_server(args.host, args.port, args.data_dir, args.upstream)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     print(f"SuperGrok Router: http://{args.host}:{args.port}")
     print(f"Data: {args.data_dir.resolve()}")
-    usage.start()
+    server.usage.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        usage.stop()
+        server.usage.stop()
         server.server_close()
         release_singleton_mutex(singleton)
 
