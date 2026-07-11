@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.test-data/
+work/
+.ai/
+.venv/
+.env
+.env.*
+state.json
+accounts/
+browser-profile/
+*.log

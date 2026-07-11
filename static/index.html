@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>SuperGrok Router</title>
+  <link rel="icon" type="image/png" href="/app-icon.png">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="SuperGrok Router 首页">
+      <span class="brand-mark" aria-hidden="true">SG</span>
+      <span>SuperGrok Router</span>
+    </a>
+    <div class="service-state"><span class="state-dot" aria-hidden="true"></span>本地服务已连接</div>
+  </header>
+
+  <main>
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <h1 id="page-title">账号与 Provider</h1>
+        <p>官方授权，自动轮换，所有 Agent 共用一个本地入口。</p>
+      </div>
+    </section>
+
+    <div class="workspace">
+      <section class="accounts-panel" aria-labelledby="accounts-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="accounts-title">账号池</h2>
+            <p id="account-summary">正在读取账号状态</p>
+          </div>
+          <button class="primary" id="add-account" type="button">添加账号</button>
+        </div>
+        <div id="loading-state" class="skeleton-list" aria-label="正在加载">
+          <span></span><span></span><span></span>
+        </div>
+        <div id="empty-state" class="empty-state" hidden>
+          <h3>账号池还是空的</h3>
+          <p>添加第一个账号，完成一次官方设备授权后即可开始转发请求。</p>
+          <button class="secondary" type="button" data-action="add">添加第一个账号</button>
+        </div>
+        <div id="account-list" class="account-list" aria-live="polite"></div>
+        <div id="pagination" class="pagination" hidden>
+          <button type="button" id="page-prev">上一页</button>
+          <span id="page-label">第 1 页</span>
+          <button type="button" id="page-next">下一页</button>
+        </div>
+      </section>
+
+      <aside class="provider-panel" aria-labelledby="provider-title">
+        <div class="provider-heading">
+          <p>连接信息</p>
+          <h2 id="provider-title">Local Provider</h2>
+        </div>
+        <label for="provider-url">Base URL</label>
+        <div class="copy-field">
+          <input id="provider-url" readonly value="正在加载">
+          <button type="button" data-copy="provider-url">复制</button>
+        </div>
+        <label for="provider-key">API Key</label>
+        <div class="copy-field">
+          <input id="provider-key" readonly type="password" value="正在加载">
+          <button type="button" id="toggle-key">显示</button>
+          <button type="button" data-copy="provider-key">复制</button>
+        </div>
+        <div class="proxy-summary">
+          <span>Windows 系统代理</span>
+          <strong id="proxy-status">正在读取</strong>
+        </div>
+        <button class="secondary wide" id="open-details" type="button">连接详情</button>
+      </aside>
+    </div>
+  </main>
+
+  <dialog id="account-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-shell">
+      <button class="dialog-close" type="button" aria-label="关闭">关闭</button>
+      <div id="create-step">
+        <p class="kicker">官方 xAI OAuth</p>
+        <h2 id="dialog-title">添加账号</h2>
+        <p>名称只用于本机识别，不会发送给 xAI。</p>
+        <form id="account-form">
+          <label for="account-name">账号名称</label>
+          <input id="account-name" name="name" maxlength="60" autocomplete="off" placeholder="例如：主账号" required>
+          <label for="membership-type">会员类型</label>
+          <select id="membership-type" name="membership_type" required>
+            <option value="super">Super</option>
+            <option value="heavy">Heavy</option>
+            <option value="lite">Lite</option>
+          </select>
+          <button class="primary wide" type="submit">获取官方授权</button>
+        </form>
+      </div>
+      <div id="auth-step" hidden>
+        <p class="kicker">等待确认</p>
+        <h2>在 xAI 完成授权</h2>
+        <p>打开官方页面，登录你要添加的账号，然后确认下面的一次性代码。</p>
+        <a id="auth-link" class="official-link" target="_blank" rel="noopener">打开 xAI 官方授权页</a>
+        <div class="device-code-block">
+          <span>一次性代码</span>
+          <strong id="device-code">正在生成</strong>
+        </div>
+        <p id="auth-progress" class="auth-progress" role="status">正在启动官方授权</p>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="delete-dialog" aria-labelledby="delete-title">
+    <div class="dialog-shell compact-dialog">
+      <p class="kicker">删除账号</p>
+      <h2 id="delete-title">确认删除 <span id="delete-account-name"></span>？</h2>
+      <p>该账号的本机授权文件会一并清除，此操作无法撤销。</p>
+      <p id="delete-error" class="inline-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary" id="cancel-delete" type="button">取消</button>
+        <button class="danger-solid" id="confirm-delete" type="button">确认删除</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="details-drawer" class="details-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+    <div class="drawer-heading">
+      <div>
+        <p class="kicker">Provider details</p>
+        <h2 id="drawer-title">连接详情</h2>
+      </div>
+      <button type="button" id="close-details">关闭</button>
+    </div>
+    <dl class="detail-list">
+      <div><dt>轮换策略</dt><dd>Fill first，额度耗尽后切换</dd></div>
+      <div><dt>官方上游</dt><dd id="upstream-value">正在加载</dd></div>
+      <div><dt>系统代理</dt><dd id="drawer-proxy">正在加载</dd></div>
+      <div><dt>账号隔离</dt><dd>每个账号使用独立 GROK_HOME</dd></div>
+      <div><dt>额度监控</dt><dd>启动即检查，此后每 30–35 分钟全量轮询</dd></div>
+    </dl>
+    <label class="drawer-label" for="client-example">环境变量</label>
+    <pre id="client-example"><code>OPENAI_BASE_URL=http://127.0.0.1:8742/v1
+OPENAI_API_KEY=loading</code></pre>
+    <button class="primary wide" type="button" data-copy="client-example">复制环境变量</button>
+    <button class="secondary wide integration-entry" id="open-integrations" type="button">Zcode / Hermes / Grok Build 配置</button>
+  </aside>
+
+  <aside id="integration-drawer" class="details-drawer integration-drawer" role="dialog" aria-modal="true" aria-labelledby="integration-title" hidden>
+    <div class="drawer-heading">
+      <div>
+        <p class="kicker">Client presets</p>
+        <h2 id="integration-title">客户端配置</h2>
+      </div>
+      <button type="button" id="close-integrations">关闭</button>
+    </div>
+    <div class="integration-tabs" role="tablist" aria-label="客户端">
+      <button type="button" role="tab" data-integration="zcode" aria-selected="true">Zcode</button>
+      <button type="button" role="tab" data-integration="hermes" aria-selected="false">Hermes</button>
+      <button type="button" role="tab" data-integration="grok_build" aria-selected="false">Grok Build</button>
+    </div>
+    <div class="integration-meta">
+      <strong id="integration-label">Zcode Desktop</strong>
+      <span id="integration-filename"></span>
+    </div>
+    <p id="integration-note" class="integration-note"></p>
+    <pre id="integration-config" class="integration-config" tabindex="0"></pre>
+    <div class="integration-actions">
+      <button class="secondary" id="back-details" type="button">返回连接详情</button>
+      <button class="primary" type="button" data-copy="integration-config">复制配置</button>
+    </div>
+  </aside>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
