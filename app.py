@@ -36,7 +36,7 @@ QUOTA_MARKERS = (
 
 def model_reasoning_capability(model_id: str) -> str:
     if model_id == "grok-4.5":
-        return "低 / 中 / 高（默认高）"
+        return "low / medium / high / xhigh（默认 high）"
     if model_id == "grok-4.3":
         return "无 / 低 / 中 / 高（默认低）"
     if model_id.startswith("grok-4.20-multi-agent"):
@@ -143,7 +143,7 @@ def integration_configs(
             '          "modalities": {"input": ["text"], "output": ["text"]},',
             '          "reasoning": {',
             '            "enabled": true,',
-            '            "variants": ["low", "medium", "high"],',
+            '            "variants": ["low", "medium", "high", "xhigh"],',
             '            "defaultVariant": "high"',
             "          }",
             "        }",
@@ -157,7 +157,7 @@ def integration_configs(
         "zcode": {
             "label": "Zcode Desktop",
             "filename": r"%USERPROFILE%\.zcode\v2\config.json",
-            "note": f"将 provider.{provider_key} 合并进现有 JSON；推理按钮使用 xAI 官方 low / medium / high 档位。",
+            "note": f"将 provider.{provider_key} 合并进现有 JSON；推理按钮使用 Grok Build 实际提供的 low / medium / high / xhigh 档位。",
             "content": zcode_content,
         },
         "hermes": {

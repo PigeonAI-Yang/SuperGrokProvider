@@ -58,7 +58,7 @@ class IntegrationConfigTests(unittest.TestCase):
         model = payload["provider"]["supergrok-router"]["models"]["grok-4.5"]
         reasoning = model["reasoning"]
         self.assertEqual(payload["provider"]["supergrok-router"]["kind"], "openai-compatible")
-        self.assertEqual(reasoning["variants"], ["low", "medium", "high"])
+        self.assertEqual(reasoning["variants"], ["low", "medium", "high", "xhigh"])
         self.assertEqual(reasoning["defaultVariant"], "high")
         self.assertEqual(payload["provider"]["supergrok-router"]["options"]["apiKey"], self.key)
 
@@ -471,7 +471,7 @@ class ProviderRotationTests(unittest.TestCase):
                 models = result["models"]
         self.assertEqual(opener.call_args.args[0].headers["Authorization"], "Bearer selected-token")
         self.assertEqual(result["source"], "account")
-        self.assertIn("默认高", models[0]["reasoning"])
+        self.assertIn("xhigh", models[0]["reasoning"])
         self.assertIn("默认低", models[1]["reasoning"])
         self.assertIn("Agent 数", models[2]["reasoning"])
         self.assertEqual(models[3]["reasoning"], "固定关闭")
