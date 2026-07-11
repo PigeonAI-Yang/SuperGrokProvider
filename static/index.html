@@ -173,6 +173,7 @@
       <p class="drawer-label" id="create-group-title">新建分组</p>
       <form id="create-group-form" class="inline-form">
         <input id="new-group-name" maxlength="40" placeholder="例如：Zcode" required aria-label="新分组名称">
+        <select id="reuse-group-source" aria-label="要复用的 ZCODE 账号组" hidden></select>
         <button class="primary" type="submit">新建</button>
       </form>
       <p class="group-hint">启用的账号组按顺序自动兜底；隔离后保留账号，但不参与路由。</p>
@@ -194,6 +195,20 @@
         <button class="primary" type="submit">保存</button>
       </form>
       <p id="rename-account-error" class="inline-error" role="alert" hidden></p>
+    </section>
+    <section class="group-section" aria-labelledby="budget-policy-title">
+      <p class="drawer-label" id="budget-policy-title">账号额度闸门</p>
+      <form id="budget-policy-form" class="budget-form">
+        <label><input id="budget-enabled" type="checkbox"> 启用周期闸门</label>
+        <label>周期（小时）<input id="budget-hours" type="number" min="0.5" max="168" step="0.5" required></label>
+        <label>最多使用周额度（%）<input id="budget-percent" type="number" min="0.1" max="100" step="0.1" required></label>
+        <button class="primary" type="submit">保存闸门</button>
+      </form>
+      <p id="budget-policy-state" class="group-hint"></p>
+      <div class="budget-actions">
+        <button class="secondary" id="budget-release-window" type="button">本周期解除</button>
+        <button class="danger" id="budget-release-permanent" type="button">永久解除</button>
+      </div>
     </section>
     <dl class="detail-list account-meta">
       <div><dt>登录邮箱</dt><dd id="account-drawer-email"></dd></div>
@@ -256,6 +271,21 @@ OPENAI_API_KEY=loading</code></pre>
       <button class="primary" type="button" data-copy="integration-config">复制配置</button>
     </div>
   </aside>
+
+  <dialog id="budget-alert-dialog" aria-labelledby="budget-alert-title">
+    <div class="dialog-shell compact-dialog">
+      <p class="kicker">MCP budget gate</p>
+      <h2 id="budget-alert-title">MCP 已暂停</h2>
+      <p>所有可路由账号都达到了各自的周期额度上限。请选择要放开的账号；未经明确授权不会继续请求。</p>
+      <label class="dialog-label" for="budget-alert-account">账号</label>
+      <select id="budget-alert-account"></select>
+      <div class="dialog-actions">
+        <button class="secondary" id="budget-alert-keep" type="button">保持暂停</button>
+        <button class="primary" id="budget-alert-window" type="button">本周期解除</button>
+        <button class="danger-solid" id="budget-alert-permanent" type="button">永久解除</button>
+      </div>
+    </div>
+  </dialog>
 
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <script src="/app.js" defer></script>

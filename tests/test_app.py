@@ -112,11 +112,11 @@ class StoreTests(unittest.TestCase):
         )
         migrated = AccountStore(Path(self.temp.name))
         state = migrated.snapshot()
-        self.assertEqual(state["version"], 3)
+        self.assertEqual(state["version"], 4)
         self.assertEqual(next(agent for agent in state["agents"] if agent["id"] == "zcode")["api_key"], "sgr_existing_key")
         self.assertEqual(next(group for group in state["groups"] if group["id"] == "default")["active_id"], account_id)
         self.assertEqual(state["accounts"][0]["group_id"], "default")
-        self.assertEqual({agent["id"] for agent in state["agents"] if agent["kind"] != "custom"}, {"zcode", "grok-build", "hermes"})
+        self.assertEqual({agent["id"] for agent in state["agents"] if agent["kind"] != "custom"}, {"zcode", "grok-build", "hermes", "codex-mcp"})
 
     def test_v2_groups_migrate_to_agents_without_losing_keys_or_membership(self):
         custom_group_id = "b" * 32
@@ -134,12 +134,26 @@ class StoreTests(unittest.TestCase):
             encoding="utf-8",
         )
         migrated = AccountStore(Path(self.temp.name)).snapshot()
-        self.assertEqual(migrated["version"], 3)
+        self.assertEqual(migrated["version"], 4)
         self.assertEqual(next(agent for agent in migrated["agents"] if agent["id"] == "zcode")["api_key"], "sgr_zcode_old")
         custom = next(agent for agent in migrated["agents"] if agent["kind"] == "custom")
         self.assertEqual(custom["api_key"], "sgr_custom_old")
         self.assertEqual(next(group for group in migrated["groups"] if group["id"] == custom_group_id)["agent_id"], custom["id"])
         self.assertEqual(migrated["accounts"][0]["group_id"], custom_group_id)
+
+    def test_v3_state_adds_mcp_group_reference_and_per_account_gate(self):
+        account = self.store.create("旧 v3 账号")
+        state = self.store.snapshot()
+        state["version"] = 3
+        state["agents"] = [item for item in state["agents"] if item["id"] != "codex-mcp"]
+        state["groups"] = [item for item in state["groups"] if item.get("agent_id") != "codex-mcp"]
+        state["accounts"][0].pop("budget_policy", None)
+        self.store.path.write_text(json.dumps(state), encoding="utf-8")
+        migrated = AccountStore(Path(self.temp.name)).snapshot()
+        self.assertEqual(migrated["version"], 4)
+        mcp_group = next(item for item in migrated["groups"] if item.get("agent_id") == "codex-mcp")
+        self.assertEqual(mcp_group["source_group_id"], "default")
+        self.assertTrue(migrated["accounts"][0]["budget_policy"]["enabled"])
 
     def test_group_lifecycle_and_exclusive_account_move(self):
         group = self.store.create_group("Zcode")
@@ -177,6 +191,17 @@ class StoreTests(unittest.TestCase):
             self.store.update(account["id"], state="ready", usage_period_end=end, usage_percent=percent)
         self.store.select(later["id"])
         self.assertEqual([a["id"] for a in self.store.candidates()], [high["id"], low["id"], later["id"]])
+
+    def test_each_account_has_an_independent_five_hour_five_percent_gate(self):
+        account = self.store.create("闸门账号")
+        start = app.datetime(2026, 7, 12, tzinfo=app.timezone.utc)
+        self.store.update(account["id"], usage_percent=10.0)
+        self.assertTrue(self.store.budget_allows(account["id"], start))
+        self.store.update(account["id"], usage_percent=15.0)
+        self.assertFalse(self.store.budget_allows(account["id"], start + app.timedelta(hours=1)))
+        self.assertTrue(self.store.budget_allows(account["id"], start + app.timedelta(hours=5)))
+        policy = self.store.get(account["id"])["budget_policy"]
+        self.assertEqual((policy["window_hours"], policy["limit_percent"]), (5.0, 5.0))
 
     def test_auth_reader_does_not_require_fixed_root_key(self):
         account = self.store.create("认证账号")
@@ -287,8 +312,8 @@ class ProviderRotationTests(unittest.TestCase):
         self.store = AccountStore(Path(self.temp.name))
         self.first = self.store.create("第一个")
         self.second = self.store.create("第二个")
-        self.store.update(self.first["id"], state="ready")
-        self.store.update(self.second["id"], state="ready")
+        self.store.update(self.first["id"], state="ready", usage_percent=0.0)
+        self.store.update(self.second["id"], state="ready", usage_percent=0.0)
         self.server = RouterServer(("127.0.0.1", 0), Handler, self.store, FakeAuth(), "https://api.x.ai")
         self.original_attempt = Handler._attempt
 
@@ -323,6 +348,42 @@ class ProviderRotationTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.first["id"])["state"], "exhausted")
         self.assertIsNotNone(self.store.get(self.second["id"])["last_used_at"])
         self.assertEqual(self.store.group_config("default")["active_id"], self.second["id"])
+
+    def test_mcp_reuses_zcode_group_and_skips_only_the_account_at_its_gate(self):
+        start = app.datetime.now(app.timezone.utc)
+        for account in (self.first, self.second):
+            self.store.update(account["id"], usage_percent=0.0)
+            self.store.budget_allows(account["id"], start)
+        self.store.update(self.first["id"], usage_percent=5.0)
+        self.store.update(self.second["id"], usage_percent=2.0)
+        self.assertTrue(all(account["shared"] for account in self.store.public_snapshot("codex-mcp")["accounts"]))
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/v1/responses",
+            data=b'{"model":"grok-4.5","input":"mcp"}',
+            headers={"Authorization": "Bearer " + self.store.agent_config("codex-mcp")["api_key"], "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            self.assertEqual(json.load(response)["id"], "response_ok")
+        self.assertIsNone(self.store.get(self.first["id"])["last_used_at"])
+        self.assertIsNotNone(self.store.get(self.second["id"])["last_used_at"])
+
+    def test_account_gate_applies_outside_the_mcp_page_and_stops_all_accounts(self):
+        now = app.datetime.now(app.timezone.utc)
+        for account in (self.first, self.second):
+            self.store.budget_allows(account["id"], now)
+            self.store.update(account["id"], usage_percent=5.0)
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/v1/responses",
+            data=b'{"model":"grok-4.5","input":"blocked"}',
+            headers={"Authorization": "Bearer " + self.store.api_key(), "Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(error.exception.code, 429)
+        self.assertEqual(json.load(error.exception)["error"]["type"], "budget_gate")
+        self.assertEqual(len(self.store.agent_config("codex-mcp")["budget_alert"]["accounts"]), 2)
 
     def test_agent_key_routes_only_to_groups_owned_by_that_agent(self):
         agent = self.store.create_agent("Codex Custom")

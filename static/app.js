@@ -1,7 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const PAGE_SIZE = 4;
 const state = {
-  accounts: [], agents: [], agentId: "zcode", groups: [], groupId: null, moveTargets: [],
+  accounts: [], agents: [], agentId: "zcode", groups: [], groupId: null, moveTargets: [], reusableGroups: [],
   activeId: null, config: null,
   authId: null, accountDrawerId: null, deleteTarget: null, moveId: null, poll: null, page: 0,
   integration: "zcode", drawerTrigger: "#open-details",
@@ -84,14 +84,33 @@ function renderGroupControls() {
   $("#group-ready-count").textContent = group.ready_count;
   const deleteButton = $("#delete-group");
   deleteButton.hidden = group.is_last;
-  deleteButton.disabled = group.account_count > 0;
-  deleteButton.textContent = group.account_count > 0 ? `先移走 ${group.account_count} 个账号` : "删除当前账号组";
+  deleteButton.disabled = !group.source_group_id && group.account_count > 0;
+  deleteButton.textContent = group.source_group_id ? "移除当前复用组" : (group.account_count > 0 ? `先移走 ${group.account_count} 个账号` : "删除当前账号组");
   const toggle = $("#toggle-group");
   toggle.textContent = group.enabled ? "已启用 · 点击隔离" : "已隔离 · 点击启用";
   toggle.classList.toggle("isolated", !group.enabled);
   const index = state.groups.findIndex((item) => item.id === group.id);
   $("#move-group-up").disabled = index <= 0;
   $("#move-group-down").disabled = index < 0 || index >= state.groups.length - 1;
+  const isMcp = agent.kind === "mcp";
+  $("#add-account").hidden = isMcp;
+  const nameInput = $("#new-group-name");
+  const sourceSelect = $("#reuse-group-source");
+  nameInput.hidden = isMcp;
+  nameInput.required = !isMcp;
+  sourceSelect.hidden = !isMcp;
+  sourceSelect.required = isMcp;
+  if (isMcp) {
+    sourceSelect.replaceChildren();
+    const used = new Set(state.groups.map((item) => item.source_group_id));
+    for (const source of state.reusableGroups.filter((item) => !used.has(item.id))) {
+      const option = document.createElement("option");
+      option.value = source.id;
+      option.textContent = source.name;
+      sourceSelect.append(option);
+    }
+  }
+  $("#create-group-form button").textContent = isMcp ? "复用账号组" : "新建";
 }
 
 function addedAtLabel(value) {
@@ -221,13 +240,13 @@ function renderAccounts() {
 
     const actions = document.createElement("div");
     actions.className = "account-actions";
-    if (["pending", "error"].includes(account.state)) actions.append(createButton("重新授权", "authorize", account.id));
-    if (["exhausted", "cooldown", "error"].includes(account.state)) actions.append(createButton("重置状态", "reset", account.id));
-    if (account.state === "ready" && account.id !== state.activeId && account.enabled) actions.append(createButton("设为当前", "select", account.id));
-    if (account.state === "ready") actions.append(createButton(account.enabled ? "停用" : "启用", "toggle", account.id));
+    if (!account.shared && ["pending", "error"].includes(account.state)) actions.append(createButton("重新授权", "authorize", account.id));
+    if (!account.shared && ["exhausted", "cooldown", "error"].includes(account.state)) actions.append(createButton("重置状态", "reset", account.id));
+    if (!account.shared && account.state === "ready" && account.id !== state.activeId && account.enabled) actions.append(createButton("设为当前", "select", account.id));
+    if (!account.shared && account.state === "ready") actions.append(createButton(account.enabled ? "停用" : "启用", "toggle", account.id));
     if (!["pending", "authorizing"].includes(account.state)) actions.append(createButton("刷新额度", "usage", account.id));
-    if (state.moveTargets.length > 1) actions.append(createButton("移动", "move", account.id));
-    actions.append(createButton("删除", "delete", account.id, "danger"));
+    if (!account.shared && state.moveTargets.length > 1) actions.append(createButton("移动", "move", account.id));
+    if (!account.shared) actions.append(createButton("删除", "delete", account.id, "danger"));
     row.append(identity, actions);
     list.append(row);
   }
@@ -294,6 +313,7 @@ async function load() {
     state.agents = accounts.agents;
     state.groups = accounts.groups;
     state.moveTargets = accounts.move_targets;
+    state.reusableGroups = accounts.reusable_groups || [];
     state.agentId = accounts.selected_agent_id;
     state.groupId = accounts.selected_group_id;
     state.activeId = accounts.active_id;
@@ -301,6 +321,7 @@ async function load() {
     renderAccounts();
     renderConfig();
     updateAuthDialog();
+    renderBudgetAlert();
   } catch (error) {
     $("#loading-state").hidden = true;
     toast(error.message, true);
@@ -380,9 +401,39 @@ function openAccountDrawer(id) {
   const group = state.moveTargets.find((item) => item.id === account.group_id);
   $("#account-drawer-location").textContent = group ? `${group.agent_name} / ${group.name}` : "未知";
   $("#account-drawer-created").textContent = addedAtLabel(account.created_at).replace("添加于 ", "");
+  const policy = account.budget_policy || {};
+  $("#budget-enabled").checked = policy.enabled !== false;
+  $("#budget-hours").value = policy.window_hours ?? 5;
+  $("#budget-percent").value = policy.limit_percent ?? 5;
+  $("#budget-policy-state").textContent = policy.enabled === false
+    ? "闸门已关闭；勾选并保存可重新启用"
+    : policy.permanent_override
+      ? "已永久解除；保存闸门可重新启用"
+      : policy.override_until
+      ? `本周期已解除至 ${new Date(policy.override_until).toLocaleString("zh-CN")}`
+      : "默认启用；达到上限后 MCP 自动切换下一个账号";
   $("#rename-account-error").hidden = true;
   $("#rename-account-name").focus();
   loadAccountModels(id);
+}
+
+function renderBudgetAlert() {
+  const alert = state.agents.find((item) => item.id === "codex-mcp")?.budget_alert;
+  const dialog = $("#budget-alert-dialog");
+  if (!alert || alert.acknowledged) {
+    if (dialog.open) dialog.close();
+    return;
+  }
+  if (dialog.open) return;
+  const select = $("#budget-alert-account");
+  select.replaceChildren();
+  for (const account of alert.accounts || []) {
+    const option = document.createElement("option");
+    option.value = account.id;
+    option.textContent = account.name;
+    select.append(option);
+  }
+  if (select.options.length) dialog.showModal();
 }
 
 async function loadAccountModels(id) {
@@ -601,15 +652,18 @@ $("#create-group-form").addEventListener("submit", async (event) => {
   const button = event.submitter;
   button.disabled = true;
   try {
+    const isMcp = currentAgent()?.kind === "mcp";
     const group = await api("/api/groups", {
       method: "POST",
-      body: JSON.stringify({ name: $("#new-group-name").value, agent_id: state.agentId }),
+      body: JSON.stringify(isMcp
+        ? { source_group_id: $("#reuse-group-source").value }
+        : { name: $("#new-group-name").value, agent_id: state.agentId }),
     });
     state.groupId = group.id;
     state.page = 0;
     $("#new-group-name").value = "";
     await load();
-    toast("分组已创建");
+    toast(isMcp ? "ZCODE 账号组已复用" : "分组已创建");
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -651,6 +705,39 @@ $("#rename-account-form").addEventListener("submit", async (event) => {
     button.disabled = false;
   }
 });
+
+$("#budget-policy-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.accountDrawerId) return;
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    await mutate(`/api/accounts/${state.accountDrawerId}/budget`, "POST", {
+      enabled: $("#budget-enabled").checked,
+      window_hours: Number($("#budget-hours").value),
+      limit_percent: Number($("#budget-percent").value),
+    });
+    openAccountDrawer(state.accountDrawerId);
+    toast("账号闸门已保存");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+async function releaseBudget(mode, accountId = state.accountDrawerId) {
+  if (!accountId) return;
+  await mutate(`/api/accounts/${accountId}/budget/authorize`, "POST", { mode });
+  $("#budget-alert-dialog").close();
+  if (state.accountDrawerId === accountId) openAccountDrawer(accountId);
+  toast(mode === "keep" ? "MCP 保持暂停" : mode === "window" ? "该账号本周期已解除" : "该账号闸门已永久解除");
+}
+$("#budget-release-window").addEventListener("click", () => releaseBudget("window").catch((error) => toast(error.message, true)));
+$("#budget-release-permanent").addEventListener("click", () => releaseBudget("permanent").catch((error) => toast(error.message, true)));
+$("#budget-alert-window").addEventListener("click", () => releaseBudget("window", $("#budget-alert-account").value).catch((error) => toast(error.message, true)));
+$("#budget-alert-permanent").addEventListener("click", () => releaseBudget("permanent", $("#budget-alert-account").value).catch((error) => toast(error.message, true)));
+$("#budget-alert-keep").addEventListener("click", () => releaseBudget("keep", $("#budget-alert-account").value).catch((error) => toast(error.message, true)));
 $("#toggle-group").addEventListener("click", async () => {
   try {
     await mutate(`/api/groups/${state.groupId}/toggle`);

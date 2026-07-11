@@ -75,6 +75,8 @@ public static class SuperGrokWindow {
     $script:windowHandle = [IntPtr]::Zero
     $script:windowHidden = $false
     $script:windowIconApplied = $false
+    $script:budgetPollTicks = 0
+    $script:lastBudgetAlert = $null
     $tray = New-Object System.Windows.Forms.NotifyIcon
     $appIcon = [System.Drawing.Icon]::new((Join-Path $root 'static\app-icon.ico'))
     $tray.Icon = $appIcon
@@ -121,6 +123,20 @@ public static class SuperGrokWindow {
             [SuperGrokWindow]::ShowWindow($script:windowHandle, 0) | Out-Null
             $script:windowHidden = $true
             $tray.Visible = $true
+        }
+        $script:budgetPollTicks++
+        if ($script:budgetPollTicks -ge 8) {
+            $script:budgetPollTicks = 0
+            try {
+                $mcpState = Invoke-RestMethod "$url/api/accounts?agent_id=codex-mcp" -TimeoutSec 1
+                $alert = ($mcpState.agents | Where-Object id -eq 'codex-mcp').budget_alert
+                if ($alert -and -not $alert.acknowledged -and $alert.id -ne $script:lastBudgetAlert) {
+                    $script:lastBudgetAlert = $alert.id
+                    $tray.Visible = $true
+                    $tray.ShowBalloonTip(5000, 'SuperGrok Router', 'MCP budget gate reached. Open the app to authorize.', [System.Windows.Forms.ToolTipIcon]::Warning)
+                    & $restoreWindow
+                }
+            } catch {}
         }
     })
     $timer.Start()

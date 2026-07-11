@@ -328,6 +328,14 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .group-controls button { min-height: 38px; padding: 0 9px; font-size: 11px; }
 .group-controls button.isolated { color: var(--warning); border-color: rgb(232 199 121 / 0.35); }
 .group-hint { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.budget-form { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.budget-form > label:first-child, .budget-form > button { grid-column: 1 / -1; }
+.budget-form label { margin: 0; font-size: 11px; }
+.budget-form input[type="number"] { width: 100%; min-height: 36px; margin-top: 5px; }
+.budget-form input[type="checkbox"] { min-height: auto; }
+.budget-form button { min-height: 38px; margin: 0; }
+.budget-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.budget-actions button { min-height: 36px; font-size: 11px; }
 .integration-entry { margin-top: 8px; }
 .integration-drawer { width: 600px; padding: 24px 26px; overflow: hidden; }
 .integration-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 22px 0 16px; }

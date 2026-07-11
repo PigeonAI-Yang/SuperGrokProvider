@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.client import HTTPException
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,6 +32,18 @@ QUOTA_MARKERS = (
     "run out of credits",
     "spending-limit",
 )
+
+
+def default_budget_policy() -> dict:
+    return {
+        "enabled": True,
+        "window_hours": 5.0,
+        "limit_percent": 5.0,
+        "window_started_at": None,
+        "baseline_percent": None,
+        "override_until": None,
+        "permanent_override": False,
+    }
 
 
 def model_reasoning_capability(model_id: str) -> str:
@@ -231,19 +243,34 @@ class AccountStore:
         if not self.path.exists():
             atomic_write_json(self.path, self._new_state())
         else:
-            data = self._read()
+            original = self._read()
+            data = json.loads(json.dumps(original))
             if data.get("version", 1) < 2:
                 data = self._migrate_v1(data)
             if data.get("version", 2) < 3:
                 data = self._migrate_v2(data)
-            if data != self._read():
+            if not self._find_agent(data, "codex-mcp"):
+                mcp = self._new_agent("MCP", "mcp", "codex-mcp")
+                zcode = self._find_agent(data, "zcode")
+                source_id = (zcode or {}).get("active_group_id") or "default"
+                group = self._new_group("ZCODE 默认组", mcp["id"], source_group_id=source_id)
+                mcp["active_group_id"] = group["id"]
+                data["agents"].append(mcp)
+                data["groups"].append(group)
+            for group in data.get("groups", []):
+                group.pop("account_refs", None)
+            for account in data.get("accounts", []):
+                if not isinstance(account.get("budget_policy"), dict):
+                    account["budget_policy"] = default_budget_policy()
+            data["version"] = 4
+            if data != original:
                 self._write(data)
 
     @staticmethod
     def _new_agent(
         name: str, kind: str, agent_id: str | None = None, api_key: str | None = None
     ) -> dict:
-        return {
+        agent = {
             "id": agent_id or uuid.uuid4().hex,
             "name": name,
             "kind": kind,
@@ -251,10 +278,15 @@ class AccountStore:
             "active_group_id": None,
             "created_at": utc_now(),
         }
+        return agent
 
     @staticmethod
     def _new_group(
-        name: str, agent_id: str, group_id: str | None = None, position: int = 0
+        name: str,
+        agent_id: str,
+        group_id: str | None = None,
+        position: int = 0,
+        source_group_id: str | None = None,
     ) -> dict:
         return {
             "id": group_id or uuid.uuid4().hex,
@@ -263,6 +295,7 @@ class AccountStore:
             "enabled": True,
             "position": position,
             "active_id": None,
+            "source_group_id": source_group_id,
             "created_at": utc_now(),
         }
 
@@ -272,6 +305,7 @@ class AccountStore:
             cls._new_agent("ZCODE", "zcode", "zcode"),
             cls._new_agent("GROK BUILD", "grok_build", "grok-build"),
             cls._new_agent("HERMES", "hermes", "hermes"),
+            cls._new_agent("MCP", "mcp", "codex-mcp"),
         ]
         groups = [
             cls._new_group("默认组", agent["id"], "default" if agent["id"] == "zcode" else None)
@@ -279,7 +313,9 @@ class AccountStore:
         ]
         for agent, group in zip(agents, groups):
             agent["active_group_id"] = group["id"]
-        return {"version": 3, "agents": agents, "groups": groups, "accounts": []}
+        mcp_group = next(group for group in groups if group["agent_id"] == "codex-mcp")
+        mcp_group.update(name="ZCODE 默认组", source_group_id="default")
+        return {"version": 4, "agents": agents, "groups": groups, "accounts": []}
 
     @classmethod
     def _migrate_v1(cls, data: dict) -> dict:
@@ -327,13 +363,18 @@ class AccountStore:
         for agent_id, name, kind in (
             ("grok-build", "GROK BUILD", "grok_build"),
             ("hermes", "HERMES", "hermes"),
+            ("codex-mcp", "MCP", "mcp"),
         ):
             agent = cls._new_agent(name, kind, agent_id)
-            group = cls._new_group("默认组", agent_id)
+            group = cls._new_group(
+                "ZCODE 默认组" if agent_id == "codex-mcp" else "默认组",
+                agent_id,
+                source_group_id="default" if agent_id == "codex-mcp" else None,
+            )
             agent["active_group_id"] = group["id"]
             agents.append(agent)
             groups.append(group)
-        return {"version": 3, "agents": agents, "groups": groups, "accounts": accounts}
+        return {"version": 4, "agents": agents, "groups": groups, "accounts": accounts}
 
     def _read(self) -> dict:
         return json.loads(self.path.read_text(encoding="utf-8"))
@@ -374,10 +415,16 @@ class AccountStore:
                     **self._public_group(item, data["accounts"], 0),
                     "agent_name": agent_names.get(item.get("agent_id"), "未知 Agent"),
                 }
-                for item in data["groups"]
+                for item in data["groups"] if not item.get("source_group_id")
             ],
             "accounts": [
-                self._public(account) for account in data["accounts"] if account.get("group_id") == selected_id
+                {**self._public(account), "shared": bool(group.get("source_group_id"))}
+                for account in data["accounts"]
+                if account.get("group_id") == (group.get("source_group_id") or selected_id)
+            ],
+            "reusable_groups": [
+                self._public_group(item, data["accounts"], 0)
+                for item in data["groups"] if item.get("agent_id") == "zcode"
             ],
         }
 
@@ -391,7 +438,8 @@ class AccountStore:
 
     @staticmethod
     def _public_group(group: dict, accounts: list[dict], sibling_count: int = 0) -> dict:
-        members = [account for account in accounts if account.get("group_id") == group["id"]]
+        member_group_id = group.get("source_group_id") or group["id"]
+        members = [account for account in accounts if account.get("group_id") == member_group_id]
         return {
             "id": group["id"],
             "name": group["name"],
@@ -399,6 +447,7 @@ class AccountStore:
             "enabled": group.get("enabled", True),
             "position": group.get("position", 0),
             "active_id": group.get("active_id"),
+            "source_group_id": group.get("source_group_id"),
             "created_at": group.get("created_at"),
             "account_count": len(members),
             "ready_count": sum(
@@ -409,7 +458,8 @@ class AccountStore:
 
     @staticmethod
     def _public_agent(agent: dict, groups: list[dict], accounts: list[dict]) -> dict:
-        child_ids = {group["id"] for group in groups if group.get("agent_id") == agent["id"]}
+        children = [group for group in groups if group.get("agent_id") == agent["id"]]
+        child_ids = {group.get("source_group_id") or group["id"] for group in children}
         members = [account for account in accounts if account.get("group_id") in child_ids]
         return {
             "id": agent["id"],
@@ -417,13 +467,23 @@ class AccountStore:
             "kind": agent.get("kind", "custom"),
             "active_group_id": agent.get("active_group_id"),
             "created_at": agent.get("created_at"),
-            "group_count": len(child_ids),
+            "group_count": len(children),
             "account_count": len(members),
             "ready_count": sum(
                 1 for account in members if account.get("state") == "ready" and account.get("enabled", True)
             ),
-            "is_preset": agent["id"] in {"zcode", "grok-build", "hermes"},
+            "is_preset": agent["id"] in {"zcode", "grok-build", "hermes", "codex-mcp"},
+            "budget_alert": agent.get("budget_alert"),
         }
+
+    @staticmethod
+    def _public_budget(policy: dict | None) -> dict | None:
+        if not policy:
+            return None
+        return {key: policy.get(key) for key in (
+            "enabled", "window_hours", "limit_percent", "window_started_at",
+            "override_until", "permanent_override", "alert",
+        )}
 
     def agents(self) -> list[dict]:
         data = self.snapshot()
@@ -449,6 +509,124 @@ class AccountStore:
             if secrets.compare_digest(api_key, agent["api_key"]):
                 return agent.copy()
         return None
+
+    def update_budget_policy(self, account_id: str, enabled, window_hours, limit_percent) -> dict:
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled 必须是布尔值")
+        try:
+            hours = float(window_hours)
+            percent = float(limit_percent)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("周期和额度必须是数字") from exc
+        if not 0.5 <= hours <= 168:
+            raise ValueError("周期必须在 0.5–168 小时之间")
+        if not 0.1 <= percent <= 100:
+            raise ValueError("额度必须在 0.1%–100% 之间")
+        with self.lock:
+            data = self._read()
+            account = next((item for item in data["accounts"] if item["id"] == account_id), None)
+            if not account:
+                raise KeyError(account_id)
+            policy = account.setdefault("budget_policy", default_budget_policy())
+            policy.update(
+                enabled=enabled,
+                window_hours=hours,
+                limit_percent=percent,
+                window_started_at=None,
+                baseline_percent=None,
+                override_until=None,
+                permanent_override=False,
+                alert=None,
+            )
+            self._write(data)
+            return self._public_budget(policy) or {}
+
+    def budget_allows(self, account_id: str, now: datetime | None = None) -> bool:
+        now = now or datetime.now(timezone.utc)
+        with self.lock:
+            data = self._read()
+            account = next((item for item in data["accounts"] if item["id"] == account_id), None)
+            if not account:
+                raise KeyError(account_id)
+            policy = account.setdefault("budget_policy", default_budget_policy())
+            if not policy.get("enabled", True) or policy.get("permanent_override"):
+                return True
+            override_until = policy.get("override_until")
+            if override_until and datetime.fromisoformat(override_until) > now:
+                return True
+            if account.get("usage_percent") is None:
+                return False
+            started = datetime.fromisoformat(policy["window_started_at"]) if policy.get("window_started_at") else None
+            window = timedelta(hours=float(policy.get("window_hours", 5)))
+            if not started or now >= started + window:
+                policy.update(
+                    window_started_at=now.isoformat(),
+                    baseline_percent=float(account["usage_percent"]),
+                    override_until=None,
+                )
+            current = float(account["usage_percent"])
+            baseline = float(policy.get("baseline_percent", current))
+            if current < baseline:  # Official weekly reset occurred inside our window.
+                policy["baseline_percent"] = current
+                baseline = current
+            allowed = current - baseline < float(policy.get("limit_percent", 5))
+            self._write(data)
+            return allowed
+
+    def raise_budget_alert(self, agent_id: str, account_ids: list[str]) -> dict:
+        with self.lock:
+            data = self._read()
+            agent = self._find_agent(data, agent_id)
+            if not agent:
+                raise KeyError(agent_id)
+            alert = agent.get("budget_alert")
+            if not alert:
+                alert = {
+                    "id": uuid.uuid4().hex,
+                    "created_at": utc_now(),
+                    "acknowledged": False,
+                    "message": "全部账号已达到当前周期额度上限，Grok MCP 已暂停。",
+                    "accounts": [
+                        {"id": item["id"], "name": item["name"]}
+                        for item in data["accounts"] if item["id"] in account_ids
+                    ],
+                }
+                agent["budget_alert"] = alert
+                self._write(data)
+            return alert.copy()
+
+    def clear_budget_alert(self, agent_id: str) -> None:
+        with self.lock:
+            data = self._read()
+            agent = self._find_agent(data, agent_id)
+            if agent and agent.get("budget_alert"):
+                agent["budget_alert"] = None
+                self._write(data)
+
+    def authorize_budget(self, account_id: str, mode: str) -> dict:
+        if mode not in {"keep", "window", "permanent"}:
+            raise ValueError("授权模式无效")
+        with self.lock:
+            data = self._read()
+            account = next((item for item in data["accounts"] if item["id"] == account_id), None)
+            if not account:
+                raise KeyError(account_id)
+            policy = account.setdefault("budget_policy", default_budget_policy())
+            if mode == "keep":
+                pass
+            elif mode == "window":
+                started = datetime.fromisoformat(policy["window_started_at"]) if policy.get("window_started_at") else datetime.now(timezone.utc)
+                policy["override_until"] = (started + timedelta(hours=float(policy.get("window_hours", 5)))).isoformat()
+            else:
+                policy["permanent_override"] = True
+            mcp = self._find_agent(data, "codex-mcp")
+            if mcp:
+                if mode == "keep" and mcp.get("budget_alert"):
+                    mcp["budget_alert"]["acknowledged"] = True
+                else:
+                    mcp["budget_alert"] = None
+            self._write(data)
+            return self._public_budget(policy) or {}
 
     def create_agent(self, name: str) -> dict:
         name = name.strip()
@@ -515,6 +693,21 @@ class AccountStore:
             self._write(data)
             return self._public_group(group, data["accounts"], len(siblings) + 1)
 
+    def reuse_group(self, source_group_id: str) -> dict:
+        with self.lock:
+            data = self._read()
+            source = self._find_group(data, source_group_id)
+            mcp = self._find_agent(data, "codex-mcp")
+            if not source or source.get("agent_id") != "zcode" or not mcp:
+                raise KeyError(source_group_id)
+            siblings = [item for item in data["groups"] if item.get("agent_id") == mcp["id"]]
+            if any(item.get("source_group_id") == source_group_id for item in siblings):
+                raise ValueError("该 ZCODE 账号组已复用")
+            group = self._new_group(source["name"], mcp["id"], position=len(siblings), source_group_id=source_group_id)
+            data["groups"].append(group)
+            self._write(data)
+            return self._public_group(group, data["accounts"], len(siblings) + 1)
+
     def rename_group(self, group_id: str, name: str) -> dict:
         name = name.strip()
         if not name or len(name) > 40:
@@ -575,6 +768,8 @@ class AccountStore:
                 raise KeyError(group_id)
             if any(account.get("group_id") == group_id for account in data["accounts"]):
                 raise ValueError("请先移走该组内的账号")
+            if any(item.get("source_group_id") == group_id for item in data["groups"]):
+                raise ValueError("请先从 MCP 分页移除该复用组")
             siblings = [item for item in data["groups"] if item.get("agent_id") == group.get("agent_id")]
             if len(siblings) == 1:
                 raise ValueError("每个 Agent 至少保留一个账号组")
@@ -617,8 +812,11 @@ class AccountStore:
             "usage_error",
             "product_usage",
             "group_id",
+            "budget_policy",
         )
-        return {key: account.get(key) for key in allowed}
+        result = {key: account.get(key) for key in allowed}
+        result["budget_policy"] = AccountStore._public_budget(account.get("budget_policy"))
+        return result
 
     def create(self, name: str, membership_type: str = "unknown", group_id: str = "default") -> dict:
         name = name.strip()
@@ -629,8 +827,11 @@ class AccountStore:
             raise ValueError("会员类型必须是 Lite、Super 或 Heavy")
         with self.lock:
             data = self._read()
-            if not self._find_group(data, group_id):
+            group = self._find_group(data, group_id)
+            if not group:
                 raise ValueError("分组不存在")
+            if group.get("source_group_id"):
+                raise ValueError("MCP 分页只能复用 ZCODE 账号组")
             if any(item["name"].casefold() == name.casefold() for item in data["accounts"]):
                 raise ValueError("账号名称已存在")
             account_id = uuid.uuid4().hex
@@ -654,6 +855,7 @@ class AccountStore:
                 "usage_checked_at": None,
                 "usage_error": None,
                 "product_usage": [],
+                "budget_policy": default_budget_policy(),
                 "group_id": group_id,
             }
             data["accounts"].append(account)
@@ -710,11 +912,11 @@ class AccountStore:
             if account.get("state") != "ready" or not account.get("enabled", True):
                 raise ValueError("只能选择已就绪且启用的账号")
             target_group_id = group_id or account.get("group_id", "default")
-            if account.get("group_id", "default") != target_group_id:
-                raise ValueError("账号不属于该分组")
             group = self._find_group(data, target_group_id)
             if not group:
                 raise KeyError(target_group_id)
+            if account.get("group_id", "default") != (group.get("source_group_id") or target_group_id):
+                raise ValueError("账号不属于该分组")
             group["active_id"] = account_id
             agent = self._find_agent(data, group.get("agent_id"))
             if agent:
@@ -729,11 +931,11 @@ class AccountStore:
             if not account:
                 raise KeyError(account_id)
             target_group_id = group_id or account.get("group_id", "default")
-            if account.get("group_id", "default") != target_group_id:
-                raise ValueError("账号不属于该分组")
             group = self._find_group(data, target_group_id)
             if not group:
                 raise KeyError(target_group_id)
+            if account.get("group_id", "default") != (group.get("source_group_id") or target_group_id):
+                raise ValueError("账号不属于该分组")
             group["active_id"] = account_id
             agent = self._find_agent(data, group.get("agent_id"))
             if agent:
@@ -748,6 +950,8 @@ class AccountStore:
             target = self._find_group(data, group_id)
             if not target:
                 raise ValueError("目标分组不存在")
+            if target.get("source_group_id"):
+                raise ValueError("账号不能移动到 MCP 复用组")
             account = next((item for item in data["accounts"] if item["id"] == account_id), None)
             if not account:
                 raise KeyError(account_id)
@@ -814,10 +1018,11 @@ class AccountStore:
                     changed = True
             if changed:
                 self._write(data)
+            member_group_id = group.get("source_group_id") or group_id
             ready = [
                 a.copy()
                 for a in data["accounts"]
-                if a.get("group_id", "default") == group_id
+                if a.get("group_id", "default") == member_group_id
                 and a.get("state") == "ready"
                 and a.get("enabled", True)
             ]
@@ -1261,10 +1466,26 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/agents":
                 return self._json(201, self.app.store.create_agent(str(body.get("name", ""))))
             if path == "/api/groups":
+                if body.get("source_group_id"):
+                    return self._json(201, self.app.store.reuse_group(str(body["source_group_id"])))
                 return self._json(
                     201,
                     self.app.store.create_group(
                         str(body.get("name", "")), str(body.get("agent_id", "zcode"))
+                    ),
+                )
+            budget_match = re.fullmatch(r"/api/accounts/([0-9a-f]{32})/budget(?:/(authorize))?", path)
+            if budget_match:
+                account_id, action = budget_match.groups()
+                if action == "authorize":
+                    return self._json(200, self.app.store.authorize_budget(account_id, str(body.get("mode", ""))))
+                return self._json(
+                    200,
+                    self.app.store.update_budget_policy(
+                        account_id,
+                        body.get("enabled"),
+                        body.get("window_hours"),
+                        body.get("limit_percent"),
                     ),
                 )
             if path == "/api/accounts":
@@ -1458,13 +1679,34 @@ class Handler(SimpleHTTPRequestHandler):
     def _proxy(self, body: bytes, agent_id: str) -> None:
         with self.app.route_lock(agent_id):
             groups = self.app.store.routing_groups(agent_id)
+            source_ids = {group.get("source_group_id") or group["id"] for group in groups}
+            configured_ids = [
+                account["id"] for account in self.app.store.snapshot()["accounts"]
+                if account.get("group_id") in source_ids and account.get("enabled", True)
+            ]
+            enforce_budget = (
+                self.command == "POST"
+                and urlsplit(self.path).path in {"/v1/responses", "/v1/chat/completions"}
+            )
             had_candidates = False
+            budget_denied = False
+            gated_ids: list[str] = []
             last_message = "所有账号均不可用"
             for group in groups:
                 candidates = self.app.store.candidates(group["id"])
                 had_candidates = had_candidates or bool(candidates)
                 for account in candidates:
                     with self.app.account_lock(account["id"]):
+                        if enforce_budget:
+                            if self.app.usage:
+                                account = self.app.usage.refresh_one(account["id"])
+                            if account.get("state") != "ready":
+                                continue
+                            if not self.app.store.budget_allows(account["id"]):
+                                budget_denied = True
+                                gated_ids.append(account["id"])
+                                continue
+                            self.app.store.clear_budget_alert("codex-mcp")
                         try:
                             status, reason, headers, payload, connection, response = self._attempt(
                                 account, body, refresh=True
@@ -1499,7 +1741,16 @@ class Handler(SimpleHTTPRequestHandler):
                             return self._send_upstream(status, reason, headers, payload, response)
                         self.app.store.mark_used(account["id"], group["id"])
                         return self._send_upstream(status, reason, headers, payload, response)
+            if budget_denied:
+                self.app.store.raise_budget_alert("codex-mcp", gated_ids)
+                return self._error(
+                    429,
+                    "全部账号已达到当前周期额度上限；请在 SuperGrok Router 中授权放开。",
+                    "budget_gate",
+                )
             if not had_candidates:
+                if configured_ids:
+                    return self._error(429, "所有账号均不可用或官方额度已耗尽", "accounts_exhausted")
                 return self._error(503, "该 Agent 没有启用且可用的账号组", "agent_accounts_unavailable")
             return self._error(429, last_message, "accounts_exhausted")
 
