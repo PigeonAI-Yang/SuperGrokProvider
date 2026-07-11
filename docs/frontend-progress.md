@@ -13,11 +13,12 @@ Delivered
 - Windows system proxy enforcement without direct fallback while enabled.
 - Account deletion repaired with an in-app confirmation and pending/error feedback.
 - DELETE now consumes optional request bodies, preventing keep-alive refresh requests from failing with 501; refresh errors are no longer swallowed.
-- Official billing usage polling runs at startup and every 10 minutes, with manual refresh, reset time display and automatic exhausted-state recovery.
+- Official billing usage polling runs at startup and every 30–35 minutes, with manual refresh, reset time display and automatic exhausted-state recovery.
 - The active marker now moves atomically to the account that actually handled the latest Provider request; UI reflects it within 2 seconds.
 - A secondary client-config drawer now generates copyable, client-native reasoning presets for Zcode Desktop, Hermes and Grok Build while preserving transparent upstream request bodies.
 - Independent launcher and backend singleton locks prevent duplicate windows, tray hosts and listeners.
 - The top-left brand and account workspace now share the same 1180px shell gutter.
+- Exclusive account groups now have independent Provider keys, active-account pointers and route locks; the UI supports create, rename, empty-group deletion and account moves.
 
 ## Current Loop
 
@@ -25,12 +26,12 @@ Delivered
 
 ## Next Loop
 
-- Authorize the user's real accounts through the UI.
+- None.
 
 ## Risks
 
-- Live multi-account rotation cannot be fully proven until at least two accounts are authorized.
+- One account cannot belong to multiple groups by design; use one shared group when clients should share a pool.
 
 ## Blockers
 
-- User interaction is required to approve each official xAI device authorization.
+- None.

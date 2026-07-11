@@ -97,6 +97,41 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "会员类型"):
             self.store.create("错误套餐", "premium")
 
+    def test_v1_state_migrates_to_default_group_without_changing_key_or_active_account(self):
+        account_id = "a" * 32
+        self.store.path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "api_key": "sgr_existing_key",
+                    "active_id": account_id,
+                    "accounts": [{"id": account_id, "name": "旧账号", "state": "ready", "enabled": True}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        migrated = AccountStore(Path(self.temp.name))
+        state = migrated.snapshot()
+        self.assertEqual(state["version"], 2)
+        self.assertEqual(state["groups"][0]["api_key"], "sgr_existing_key")
+        self.assertEqual(state["groups"][0]["active_id"], account_id)
+        self.assertEqual(state["accounts"][0]["group_id"], "default")
+
+    def test_group_lifecycle_and_exclusive_account_move(self):
+        group = self.store.create_group("Zcode")
+        account = self.store.create("分组账号", "super", group["id"])
+        self.store.update(account["id"], state="ready")
+        self.store.select(account["id"])
+        self.assertEqual(self.store.group_config(group["id"])["active_id"], account["id"])
+        with self.assertRaisesRegex(ValueError, "移走"):
+            self.store.delete_group(group["id"])
+        moved = self.store.move(account["id"], "default")
+        self.assertEqual(moved["group_id"], "default")
+        self.assertIsNone(self.store.group_config(group["id"])["active_id"])
+        self.store.delete_group(group["id"])
+        with self.assertRaisesRegex(ValueError, "默认组"):
+            self.store.delete_group("default")
+
     def test_cooldown_recovers_but_exhausted_does_not(self):
         cool = self.store.create("限流账号")
         spent = self.store.create("耗尽账号")
@@ -262,7 +297,36 @@ class ProviderRotationTests(unittest.TestCase):
             self.assertEqual(json.load(response)["id"], "response_ok")
         self.assertEqual(self.store.get(self.first["id"])["state"], "exhausted")
         self.assertIsNotNone(self.store.get(self.second["id"])["last_used_at"])
-        self.assertEqual(self.store.snapshot()["active_id"], self.second["id"])
+        self.assertEqual(self.store.group_config("default")["active_id"], self.second["id"])
+
+    def test_group_key_routes_only_to_accounts_in_that_group(self):
+        group = self.store.create_group("Codex")
+        self.store.move(self.second["id"], group["id"])
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/v1/responses",
+            data=b'{"model":"grok-4.5","input":"group ping"}',
+            headers={
+                "Authorization": "Bearer " + self.store.group_config(group["id"])["api_key"],
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            self.assertEqual(json.load(response)["id"], "response_ok")
+        self.assertIsNone(self.store.get(self.first["id"])["last_used_at"])
+        self.assertIsNotNone(self.store.get(self.second["id"])["last_used_at"])
+        self.assertEqual(self.store.group_config(group["id"])["active_id"], self.second["id"])
+
+    def test_empty_group_does_not_fall_back_to_default_accounts(self):
+        group = self.store.create_group("空组")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/v1/models",
+            headers={"Authorization": "Bearer " + self.store.group_config(group["id"])["api_key"]},
+        )
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(error.exception.code, 503)
+        self.assertEqual(json.load(error.exception)["error"]["type"], "group_accounts_unavailable")
 
     def test_provider_rejects_wrong_local_key(self):
         request = urllib.request.Request(
@@ -275,6 +339,10 @@ class ProviderRotationTests(unittest.TestCase):
 
     def test_server_disables_address_reuse_for_single_instance_binding(self):
         self.assertFalse(RouterServer.allow_reuse_address)
+
+    def test_route_locks_are_shared_within_a_group_but_not_between_groups(self):
+        self.assertIs(self.server.route_lock("default"), self.server.route_lock("default"))
+        self.assertIsNot(self.server.route_lock("default"), self.server.route_lock("other"))
 
     def test_stream_is_rechunked_and_connection_is_reused(self):
         stream_body = b'data: {"delta":"ok"}\n\ndata: [DONE]\n\n'
@@ -307,6 +375,36 @@ class ProviderRotationTests(unittest.TestCase):
         with urllib.request.urlopen(request, timeout=5) as response:
             self.assertTrue(json.load(response)["deleted"])
         self.assertIsNone(self.store.get(extra["id"]))
+
+    def test_management_group_create_config_rename_and_delete(self):
+        create = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/groups",
+            data=json.dumps({"name": "Zcode"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(create, timeout=5) as response:
+            group = json.load(response)
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{self.server.server_port}/api/config?group_id={group['id']}", timeout=5
+        ) as response:
+            config = json.load(response)
+        self.assertEqual(config["group"]["name"], "Zcode")
+        self.assertIn(group["id"][:8], config["integrations"]["zcode"]["content"])
+
+        rename = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/groups/{group['id']}/rename",
+            data=json.dumps({"name": "Codex"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(rename, timeout=5) as response:
+            self.assertEqual(json.load(response)["name"], "Codex")
+        delete = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/groups/{group['id']}", method="DELETE"
+        )
+        with urllib.request.urlopen(delete, timeout=5) as response:
+            self.assertTrue(json.load(response)["deleted"])
 
     def test_delete_consumes_body_before_next_keep_alive_request(self):
         extra = self.store.create("带请求体删除")

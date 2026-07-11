@@ -10,3 +10,4 @@
 - [x] Add non-inference credit usage monitoring with 10-minute polling and manual refresh.
 - [x] Keep the active marker synchronized with the account that handled the latest successful Provider request.
 - [x] Align the top-left brand with the account workspace shell.
+- [x] Add exclusive account groups with per-group Provider keys and isolated routing.

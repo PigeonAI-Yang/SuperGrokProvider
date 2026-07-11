@@ -153,6 +153,9 @@ h1 {
 }
 .section-heading h2, .provider-heading h2 { margin-bottom: 5px; font-size: 22px; letter-spacing: -0.025em; }
 .section-heading p, .provider-heading p { margin: 0; color: var(--muted); font-size: 13px; }
+.heading-actions { display: grid; grid-template-columns: 138px auto auto; align-items: center; gap: 8px; }
+.heading-actions select, .heading-actions button { min-height: 38px; font-size: 12px; }
+.heading-actions button { padding: 0 12px; }
 
 button {
   min-height: 42px;
@@ -271,6 +274,14 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .detail-list dt { color: var(--muted); font-size: 12px; }
 .detail-list dd { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 13px; }
 .drawer-label { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
+.groups-drawer { overflow: hidden; }
+.group-section { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
+.inline-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.inline-form input, .inline-form button { min-height: 42px; }
+.inline-form button { margin: 0; padding: 0 13px; font-size: 12px; }
+.group-stats { display: flex; gap: 24px; margin: 16px 0; color: var(--muted); font-size: 12px; }
+.group-stats strong { margin-left: 5px; color: var(--text); }
+.group-hint { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .integration-entry { margin-top: 8px; }
 .integration-drawer { width: 600px; padding: 24px 26px; overflow: hidden; }
 .integration-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 22px 0 16px; }
@@ -291,6 +302,7 @@ dialog::backdrop { background: rgb(3 5 4 / 0.72); backdrop-filter: blur(7px); }
 .dialog-shell p:not(.kicker) { color: var(--muted); line-height: 1.6; }
 .dialog-close { position: absolute; top: 18px; right: 18px; min-height: 32px; padding: 0 10px; color: var(--muted); background: transparent; border-color: var(--line); font-size: 12px; }
 form label { display: block; margin: 26px 0 8px; color: var(--muted); font-size: 12px; }
+.dialog-label { display: block; margin: 22px 0 8px; color: var(--muted); font-size: 12px; }
 form .primary { margin-top: 12px; }
 .official-link { display: grid; place-items: center; min-height: 48px; margin: 24px 0 14px; border-radius: var(--radius-control); color: var(--accent-ink); background: var(--accent); font-weight: 700; text-decoration: none; }
 .official-link:not([href]) { pointer-events: none; opacity: 0.45; }

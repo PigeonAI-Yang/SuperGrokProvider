@@ -32,14 +32,18 @@
             <h2 id="accounts-title">账号池</h2>
             <p id="account-summary">正在读取账号状态</p>
           </div>
-          <button class="primary" id="add-account" type="button">添加账号</button>
+          <div class="heading-actions">
+            <select id="group-select" aria-label="当前分组"></select>
+            <button class="secondary" id="manage-groups" type="button">管理分组</button>
+            <button class="primary" id="add-account" type="button">添加账号</button>
+          </div>
         </div>
         <div id="loading-state" class="skeleton-list" aria-label="正在加载">
           <span></span><span></span><span></span>
         </div>
         <div id="empty-state" class="empty-state" hidden>
-          <h3>账号池还是空的</h3>
-          <p>添加第一个账号，完成一次官方设备授权后即可开始转发请求。</p>
+          <h3>当前分组还没有账号</h3>
+          <p>添加账号并完成一次官方设备授权后，该分组即可开始转发请求。</p>
           <button class="secondary" type="button" data-action="add">添加第一个账号</button>
         </div>
         <div id="account-list" class="account-list" aria-live="polite"></div>
@@ -52,7 +56,7 @@
 
       <aside class="provider-panel" aria-labelledby="provider-title">
         <div class="provider-heading">
-          <p>连接信息</p>
+          <p id="provider-group-name">连接信息</p>
           <h2 id="provider-title">Local Provider</h2>
         </div>
         <label for="provider-url">Base URL</label>
@@ -91,6 +95,8 @@
             <option value="heavy">Heavy</option>
             <option value="lite">Lite</option>
           </select>
+          <label for="account-group">所属分组</label>
+          <select id="account-group" name="group_id" required></select>
           <button class="primary wide" type="submit">获取官方授权</button>
         </form>
       </div>
@@ -110,9 +116,9 @@
 
   <dialog id="delete-dialog" aria-labelledby="delete-title">
     <div class="dialog-shell compact-dialog">
-      <p class="kicker">删除账号</p>
-      <h2 id="delete-title">确认删除 <span id="delete-account-name"></span>？</h2>
-      <p>该账号的本机授权文件会一并清除，此操作无法撤销。</p>
+      <p class="kicker" id="delete-kicker">删除账号</p>
+      <h2 id="delete-title">确认删除 <span id="delete-target-name"></span>？</h2>
+      <p id="delete-description">该账号的本机授权文件会一并清除，此操作无法撤销。</p>
       <p id="delete-error" class="inline-error" role="alert" hidden></p>
       <div class="dialog-actions">
         <button class="secondary" id="cancel-delete" type="button">取消</button>
@@ -121,7 +127,52 @@
     </div>
   </dialog>
 
+  <dialog id="move-dialog" aria-labelledby="move-title">
+    <div class="dialog-shell compact-dialog">
+      <p class="kicker">移动账号</p>
+      <h2 id="move-title">移动 <span id="move-account-name"></span></h2>
+      <p>账号只能属于一个分组；OAuth 登录状态和额度数据不会改变。</p>
+      <label class="dialog-label" for="move-group">目标分组</label>
+      <select id="move-group"></select>
+      <p id="move-error" class="inline-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary" id="cancel-move" type="button">取消</button>
+        <button class="primary" id="confirm-move" type="button">确认移动</button>
+      </div>
+    </div>
+  </dialog>
+
   <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="groups-drawer" class="details-drawer groups-drawer" role="dialog" aria-modal="true" aria-labelledby="groups-title" hidden>
+    <div class="drawer-heading">
+      <div>
+        <p class="kicker">Account groups</p>
+        <h2 id="groups-title">管理分组</h2>
+      </div>
+      <button type="button" id="close-groups">关闭</button>
+    </div>
+    <section class="group-section" aria-labelledby="current-group-title">
+      <p class="drawer-label" id="current-group-title">当前分组</p>
+      <form id="rename-group-form" class="inline-form">
+        <input id="rename-group-name" maxlength="40" required aria-label="当前分组名称">
+        <button class="secondary" type="submit">重命名</button>
+      </form>
+      <div class="group-stats">
+        <span>账号 <strong id="group-account-count">0</strong></span>
+        <span>可用 <strong id="group-ready-count">0</strong></span>
+      </div>
+      <button class="danger wide" id="delete-group" type="button">删除当前分组</button>
+    </section>
+    <section class="group-section" aria-labelledby="create-group-title">
+      <p class="drawer-label" id="create-group-title">新建分组</p>
+      <form id="create-group-form" class="inline-form">
+        <input id="new-group-name" maxlength="40" placeholder="例如：Zcode" required aria-label="新分组名称">
+        <button class="primary" type="submit">新建</button>
+      </form>
+      <p class="group-hint">每个分组拥有独立 API Key；请求不会跨组使用账号。</p>
+    </section>
+  </aside>
+
   <aside id="details-drawer" class="details-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
     <div class="drawer-heading">
       <div>
@@ -131,7 +182,7 @@
       <button type="button" id="close-details">关闭</button>
     </div>
     <dl class="detail-list">
-      <div><dt>轮换策略</dt><dd>Fill first，额度耗尽后切换</dd></div>
+      <div><dt>轮换策略</dt><dd>仅在当前分组内调度，额度耗尽后切换</dd></div>
       <div><dt>官方上游</dt><dd id="upstream-value">正在加载</dd></div>
       <div><dt>系统代理</dt><dd id="drawer-proxy">正在加载</dd></div>
       <div><dt>账号隔离</dt><dd>每个账号使用独立 GROK_HOME</dd></div>

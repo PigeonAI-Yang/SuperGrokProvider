@@ -15,7 +15,7 @@ from http.client import HTTPException
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 from urllib.request import ProxyHandler, Request, build_opener, getproxies
 
 
@@ -70,14 +70,19 @@ def release_singleton_mutex(mutex) -> None:
     kernel32.CloseHandle(handle)
 
 
-def integration_configs(provider_url: str, api_key: str) -> dict[str, dict[str, str]]:
+def integration_configs(
+    provider_url: str, api_key: str, group_id: str = "default", group_name: str = "默认组"
+) -> dict[str, dict[str, str]]:
+    provider_key = "supergrok-router" if group_id == "default" else f"supergrok-router-{group_id[:8]}"
+    provider_name = f"SuperGrok Router · {group_name}"
     quoted_url = json.dumps(provider_url, ensure_ascii=False)
     quoted_key = json.dumps(api_key, ensure_ascii=False)
+    quoted_name = json.dumps(provider_name, ensure_ascii=False)
     hermes = "\n".join(
         (
             "providers:",
-            "  supergrok-router:",
-            "    name: SuperGrok Router",
+            f"  {provider_key}:",
+            f"    name: {quoted_name}",
             f"    base_url: {quoted_url}",
             f"    api_key: {quoted_key}",
             "    api_mode: codex_responses",
@@ -94,7 +99,7 @@ def integration_configs(provider_url: str, api_key: str) -> dict[str, dict[str, 
             "[models]",
             'default_reasoning_effort = "high"',
             "",
-            "[model.supergrok-router]",
+            f"[model.{provider_key}]",
             'model = "grok-4.5"',
             f"base_url = {quoted_url}",
             'api_backend = "responses"',
@@ -108,8 +113,8 @@ def integration_configs(provider_url: str, api_key: str) -> dict[str, dict[str, 
         (
             "{",
             '  "provider": {',
-            '    "supergrok-router": {',
-            '      "name": "SuperGrok Router",',
+            f'    "{provider_key}": {{',
+            f'      "name": {quoted_name},',
             '      "kind": "openai",',
             '      "source": "custom",',
             f'      "options": {{"apiKey": {quoted_key}, "baseURL": {quoted_url}, "apiKeyRequired": true}},',
@@ -139,13 +144,13 @@ def integration_configs(provider_url: str, api_key: str) -> dict[str, dict[str, 
         "zcode": {
             "label": "Zcode Desktop",
             "filename": r"%USERPROFILE%\.zcode\v2\config.json",
-            "note": "将 provider.supergrok-router 合并进现有 JSON；推理图标会显示低 / 中 / 高。",
+            "note": f"将 provider.{provider_key} 合并进现有 JSON；推理图标会显示低 / 中 / 高。",
             "content": zcode_content,
         },
         "hermes": {
             "label": "Hermes",
             "filename": r"%USERPROFILE%\.hermes\config.yaml",
-            "note": "分别合并 providers.supergrok-router 与 agent.reasoning_effort，保留现有其他字段。",
+            "note": f"分别合并 providers.{provider_key} 与 agent.reasoning_effort，保留现有其他字段。",
             "content": hermes,
         },
         "grok_build": {
@@ -214,12 +219,35 @@ class AccountStore:
             atomic_write_json(
                 self.path,
                 {
-                    "version": 1,
-                    "api_key": "sgr_" + secrets.token_urlsafe(32),
-                    "active_id": None,
+                    "version": 2,
+                    "groups": [self._new_group("默认组", "default")],
                     "accounts": [],
                 },
             )
+        else:
+            data = self._read()
+            if data.get("version", 1) < 2:
+                self._write(self._migrate_v1(data))
+
+    @staticmethod
+    def _new_group(name: str, group_id: str | None = None) -> dict:
+        return {
+            "id": group_id or uuid.uuid4().hex,
+            "name": name,
+            "api_key": "sgr_" + secrets.token_urlsafe(32),
+            "active_id": None,
+            "created_at": utc_now(),
+        }
+
+    @classmethod
+    def _migrate_v1(cls, data: dict) -> dict:
+        group = cls._new_group("默认组", "default")
+        group["api_key"] = data.get("api_key") or group["api_key"]
+        group["active_id"] = data.get("active_id")
+        accounts = data.get("accounts") if isinstance(data.get("accounts"), list) else []
+        for account in accounts:
+            account["group_id"] = "default"
+        return {"version": 2, "groups": [group], "accounts": accounts}
 
     def _read(self) -> dict:
         return json.loads(self.path.read_text(encoding="utf-8"))
@@ -231,12 +259,96 @@ class AccountStore:
         with self.lock:
             return self._read()
 
-    def public_snapshot(self) -> dict:
+    def public_snapshot(self, group_id: str = "default") -> dict:
         data = self.snapshot()
+        group = self._find_group(data, group_id)
+        if not group:
+            raise KeyError(group_id)
         return {
-            "active_id": data.get("active_id"),
-            "accounts": [self._public(account) for account in data["accounts"]],
+            "active_id": group.get("active_id"),
+            "selected_group_id": group_id,
+            "groups": [self._public_group(item, data["accounts"]) for item in data["groups"]],
+            "accounts": [
+                self._public(account) for account in data["accounts"] if account.get("group_id") == group_id
+            ],
         }
+
+    @staticmethod
+    def _find_group(data: dict, group_id: str) -> dict | None:
+        return next((group for group in data.get("groups", []) if group.get("id") == group_id), None)
+
+    @staticmethod
+    def _public_group(group: dict, accounts: list[dict]) -> dict:
+        members = [account for account in accounts if account.get("group_id") == group["id"]]
+        return {
+            "id": group["id"],
+            "name": group["name"],
+            "active_id": group.get("active_id"),
+            "created_at": group.get("created_at"),
+            "account_count": len(members),
+            "ready_count": sum(
+                1 for account in members if account.get("state") == "ready" and account.get("enabled", True)
+            ),
+            "is_default": group["id"] == "default",
+        }
+
+    def groups(self) -> list[dict]:
+        data = self.snapshot()
+        return [self._public_group(group, data["accounts"]) for group in data["groups"]]
+
+    def group_config(self, group_id: str) -> dict:
+        data = self.snapshot()
+        group = self._find_group(data, group_id)
+        if not group:
+            raise KeyError(group_id)
+        return group.copy()
+
+    def group_for_key(self, api_key: str) -> dict | None:
+        data = self.snapshot()
+        for group in data["groups"]:
+            if secrets.compare_digest(api_key, group["api_key"]):
+                return group.copy()
+        return None
+
+    def create_group(self, name: str) -> dict:
+        name = name.strip()
+        if not name or len(name) > 40:
+            raise ValueError("分组名称必须为 1-40 个字符")
+        with self.lock:
+            data = self._read()
+            if any(group["name"].casefold() == name.casefold() for group in data["groups"]):
+                raise ValueError("分组名称已存在")
+            group = self._new_group(name)
+            data["groups"].append(group)
+            self._write(data)
+            return self._public_group(group, data["accounts"])
+
+    def rename_group(self, group_id: str, name: str) -> dict:
+        name = name.strip()
+        if not name or len(name) > 40:
+            raise ValueError("分组名称必须为 1-40 个字符")
+        with self.lock:
+            data = self._read()
+            group = self._find_group(data, group_id)
+            if not group:
+                raise KeyError(group_id)
+            if any(item["id"] != group_id and item["name"].casefold() == name.casefold() for item in data["groups"]):
+                raise ValueError("分组名称已存在")
+            group["name"] = name
+            self._write(data)
+            return self._public_group(group, data["accounts"])
+
+    def delete_group(self, group_id: str) -> None:
+        if group_id == "default":
+            raise ValueError("默认组不能删除")
+        with self.lock:
+            data = self._read()
+            if not self._find_group(data, group_id):
+                raise KeyError(group_id)
+            if any(account.get("group_id") == group_id for account in data["accounts"]):
+                raise ValueError("请先移走该组内的账号")
+            data["groups"] = [group for group in data["groups"] if group["id"] != group_id]
+            self._write(data)
 
     @staticmethod
     def _public(account: dict) -> dict:
@@ -260,10 +372,11 @@ class AccountStore:
             "usage_checked_at",
             "usage_error",
             "product_usage",
+            "group_id",
         )
         return {key: account.get(key) for key in allowed}
 
-    def create(self, name: str, membership_type: str = "unknown") -> dict:
+    def create(self, name: str, membership_type: str = "unknown", group_id: str = "default") -> dict:
         name = name.strip()
         if not name or len(name) > 60:
             raise ValueError("账号名称必须为 1-60 个字符")
@@ -272,6 +385,8 @@ class AccountStore:
             raise ValueError("会员类型必须是 Lite、Super 或 Heavy")
         with self.lock:
             data = self._read()
+            if not self._find_group(data, group_id):
+                raise ValueError("分组不存在")
             if any(item["name"].casefold() == name.casefold() for item in data["accounts"]):
                 raise ValueError("账号名称已存在")
             account_id = uuid.uuid4().hex
@@ -295,10 +410,9 @@ class AccountStore:
                 "usage_checked_at": None,
                 "usage_error": None,
                 "product_usage": [],
+                "group_id": group_id,
             }
             data["accounts"].append(account)
-            if not data.get("active_id"):
-                data["active_id"] = account_id
             self._write(data)
             self.account_home(account_id).mkdir(parents=True, exist_ok=True)
             return self._public(account)
@@ -325,7 +439,7 @@ class AccountStore:
             self._write(data)
             return self._public(account)
 
-    def select(self, account_id: str) -> dict:
+    def select(self, account_id: str, group_id: str | None = None) -> dict:
         with self.lock:
             data = self._read()
             account = next((a for a in data["accounts"] if a["id"] == account_id), None)
@@ -333,42 +447,96 @@ class AccountStore:
                 raise KeyError(account_id)
             if account.get("state") != "ready" or not account.get("enabled", True):
                 raise ValueError("只能选择已就绪且启用的账号")
-            data["active_id"] = account_id
+            target_group_id = group_id or account.get("group_id", "default")
+            if account.get("group_id", "default") != target_group_id:
+                raise ValueError("账号不属于该分组")
+            group = self._find_group(data, target_group_id)
+            if not group:
+                raise KeyError(target_group_id)
+            group["active_id"] = account_id
             self._write(data)
             return self._public(account)
 
-    def mark_used(self, account_id: str) -> dict:
+    def mark_used(self, account_id: str, group_id: str | None = None) -> dict:
         with self.lock:
             data = self._read()
             account = next((a for a in data["accounts"] if a["id"] == account_id), None)
             if not account:
                 raise KeyError(account_id)
-            data["active_id"] = account_id
+            target_group_id = group_id or account.get("group_id", "default")
+            if account.get("group_id", "default") != target_group_id:
+                raise ValueError("账号不属于该分组")
+            group = self._find_group(data, target_group_id)
+            if not group:
+                raise KeyError(target_group_id)
+            group["active_id"] = account_id
             account.update(last_used_at=utc_now(), last_error=None)
+            self._write(data)
+            return self._public(account)
+
+    def move(self, account_id: str, group_id: str) -> dict:
+        with self.lock:
+            data = self._read()
+            target = self._find_group(data, group_id)
+            if not target:
+                raise ValueError("目标分组不存在")
+            account = next((item for item in data["accounts"] if item["id"] == account_id), None)
+            if not account:
+                raise KeyError(account_id)
+            source_id = account.get("group_id", "default")
+            if source_id == group_id:
+                return self._public(account)
+            source = self._find_group(data, source_id)
+            account["group_id"] = group_id
+            if source and source.get("active_id") == account_id:
+                replacement = next(
+                    (
+                        item
+                        for item in data["accounts"]
+                        if item.get("group_id") == source_id
+                        and item.get("state") == "ready"
+                        and item.get("enabled", True)
+                    ),
+                    None,
+                )
+                source["active_id"] = replacement["id"] if replacement else None
+            if not target.get("active_id") and account.get("state") == "ready" and account.get("enabled", True):
+                target["active_id"] = account_id
             self._write(data)
             return self._public(account)
 
     def delete(self, account_id: str) -> None:
         with self.lock:
             data = self._read()
+            deleted = next((a for a in data["accounts"] if a["id"] == account_id), None)
             before = len(data["accounts"])
             data["accounts"] = [a for a in data["accounts"] if a["id"] != account_id]
             if len(data["accounts"]) == before:
                 raise KeyError(account_id)
-            if data.get("active_id") == account_id:
+            group = self._find_group(data, deleted.get("group_id", "default")) if deleted else None
+            if group and group.get("active_id") == account_id:
                 ready = next(
-                    (a for a in data["accounts"] if a.get("state") == "ready" and a.get("enabled", True)),
+                    (
+                        a
+                        for a in data["accounts"]
+                        if a.get("group_id", "default") == group["id"]
+                        and a.get("state") == "ready"
+                        and a.get("enabled", True)
+                    ),
                     None,
                 )
-                data["active_id"] = ready["id"] if ready else None
+                group["active_id"] = ready["id"] if ready else None
             self._write(data)
         account_dir = self.account_home(account_id).parent
         if account_dir.exists() and self.accounts_root in account_dir.resolve().parents:
             shutil.rmtree(account_dir)
 
-    def candidates(self) -> list[dict]:
+    def candidates(self, group_id: str = "default") -> list[dict]:
         with self.lock:
             data = self._read()
+            group = self._find_group(data, group_id)
+            if not group:
+                raise KeyError(group_id)
             now = time.time()
             changed = False
             for account in data["accounts"]:
@@ -378,8 +546,14 @@ class AccountStore:
                     changed = True
             if changed:
                 self._write(data)
-            ready = [a.copy() for a in data["accounts"] if a.get("state") == "ready" and a.get("enabled", True)]
-            active_id = data.get("active_id")
+            ready = [
+                a.copy()
+                for a in data["accounts"]
+                if a.get("group_id", "default") == group_id
+                and a.get("state") == "ready"
+                and a.get("enabled", True)
+            ]
+            active_id = group.get("active_id")
             # ponytail: xAI billing timestamps are normalized ISO strings; parse only if that contract changes.
             ready.sort(
                 key=lambda a: (
@@ -393,7 +567,7 @@ class AccountStore:
             return ready
 
     def api_key(self) -> str:
-        return self.snapshot()["api_key"]
+        return self.group_config("default")["api_key"]
 
 
 def read_auth_identity(home: Path) -> tuple[str | None, str | None]:
@@ -637,8 +811,18 @@ class RouterServer(ThreadingHTTPServer):
         self.auth = auth
         self.usage = usage
         self.upstream = upstream.rstrip("/")
-        # ponytail: serialize upstream selection; use per-account locks only if local throughput matters.
-        self.route_lock = threading.Lock()
+        self.lock_registry_guard = threading.Lock()
+        self.route_locks: dict[str, threading.Lock] = {}
+        self.account_locks: dict[str, threading.Lock] = {}
+
+    def route_lock(self, group_id: str) -> threading.Lock:
+        with self.lock_registry_guard:
+            return self.route_locks.setdefault(group_id, threading.Lock())
+
+    def account_lock(self, account_id: str) -> threading.Lock:
+        # ponytail: stale lock entries are tiny; prune only if account churn becomes measurable.
+        with self.lock_registry_guard:
+            return self.account_locks.setdefault(account_id, threading.Lock())
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -700,15 +884,19 @@ class Handler(SimpleHTTPRequestHandler):
             return False
         return True
 
-    def _provider_guard(self) -> bool:
+    def _provider_group(self) -> str | None:
         if not self._valid_host():
             self._error(421, "Host 不允许")
-            return False
-        expected = "Bearer " + self.app.store.api_key()
-        if not secrets.compare_digest(self.headers.get("Authorization", ""), expected):
+            return None
+        authorization = self.headers.get("Authorization", "")
+        if not authorization.startswith("Bearer "):
             self._error(401, "本地 Provider API Key 无效", "authentication_error")
-            return False
-        return True
+            return None
+        group = self.app.store.group_for_key(authorization[7:])
+        if not group:
+            self._error(401, "本地 Provider API Key 无效", "authentication_error")
+            return None
+        return group["id"]
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -716,12 +904,25 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, {"status": "ok"})
         if path == "/api/accounts":
             if self._management_guard():
-                return self._json(200, self.app.store.public_snapshot())
+                group_id = parse_qs(urlsplit(self.path).query).get("group_id", ["default"])[0]
+                try:
+                    return self._json(200, self.app.store.public_snapshot(group_id))
+                except KeyError:
+                    return self._error(404, "分组不存在")
+            return
+        if path == "/api/groups":
+            if self._management_guard():
+                return self._json(200, {"groups": self.app.store.groups()})
             return
         if path == "/api/config":
             if self._management_guard():
+                group_id = parse_qs(urlsplit(self.path).query).get("group_id", ["default"])[0]
+                try:
+                    group = self.app.store.group_config(group_id)
+                except KeyError:
+                    return self._error(404, "分组不存在")
                 provider_url = f"http://127.0.0.1:{self.server.server_port}/v1"
-                api_key = self.app.store.api_key()
+                api_key = group["api_key"]
                 return self._json(
                     200,
                     {
@@ -729,13 +930,17 @@ class Handler(SimpleHTTPRequestHandler):
                         "api_key": api_key,
                         "upstream": self.app.upstream,
                         "system_proxy": system_proxy_settings()[1],
-                        "integrations": integration_configs(provider_url, api_key),
+                        "integrations": integration_configs(
+                            provider_url, api_key, group["id"], group["name"]
+                        ),
+                        "group": {"id": group["id"], "name": group["name"]},
                     },
                 )
             return
         if path.startswith("/v1/"):
-            if self._provider_guard():
-                return self._proxy(b"")
+            group_id = self._provider_group()
+            if group_id:
+                return self._proxy(b"", group_id)
             return
         if path == "/":
             self.path = "/index.html"
@@ -744,27 +949,37 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         if path.startswith("/v1/"):
-            if not self._provider_guard():
+            group_id = self._provider_group()
+            if not group_id:
                 return
             try:
-                return self._proxy(self._read_body())
+                return self._proxy(self._read_body(), group_id)
             except ValueError as exc:
                 return self._error(413, str(exc))
         if not self._management_guard():
             return
         try:
             body = self._read_json()
+            if path == "/api/groups":
+                return self._json(201, self.app.store.create_group(str(body.get("name", ""))))
             if path == "/api/accounts":
                 account = self.app.store.create(
                     str(body.get("name", "")),
                     str(body.get("membership_type", "unknown")),
+                    str(body.get("group_id", "default")),
                 )
                 self.app.auth.start(account["id"])
                 return self._json(202, account)
             match = re.fullmatch(
-                r"/api/accounts/([0-9a-f]{32})/(authorize|select|reset|toggle|usage|membership)",
+                r"/api/accounts/([0-9a-f]{32})/(authorize|select|reset|toggle|usage|membership|move)",
                 path,
             )
+            group_match = re.fullmatch(r"/api/groups/([0-9a-f]{32}|default)/rename", path)
+            if group_match:
+                return self._json(
+                    200,
+                    self.app.store.rename_group(group_match.group(1), str(body.get("name", ""))),
+                )
             if not match:
                 return self._error(404, "接口不存在")
             account_id, action = match.groups()
@@ -773,6 +988,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(202, self.app.store.get(account_id) or {})
             if action == "select":
                 return self._json(200, self.app.store.select(account_id))
+            if action == "move":
+                with self.app.account_lock(account_id):
+                    return self._json(200, self.app.store.move(account_id, str(body.get("group_id", ""))))
             if action == "reset":
                 return self._json(
                     200,
@@ -803,14 +1021,25 @@ class Handler(SimpleHTTPRequestHandler):
             self._read_body()
         except ValueError as exc:
             return self._error(413, str(exc))
-        match = re.fullmatch(r"/api/accounts/([0-9a-f]{32})", urlsplit(self.path).path)
+        path = urlsplit(self.path).path
+        group_match = re.fullmatch(r"/api/groups/([0-9a-f]{32}|default)", path)
+        if group_match:
+            try:
+                self.app.store.delete_group(group_match.group(1))
+                return self._json(200, {"deleted": True})
+            except KeyError:
+                return self._error(404, "分组不存在")
+            except ValueError as exc:
+                return self._error(400, str(exc))
+        match = re.fullmatch(r"/api/accounts/([0-9a-f]{32})", path)
         if not match:
             return self._error(404, "接口不存在")
         account_id = match.group(1)
         try:
-            self.app.auth.cancel(account_id)
-            self.app.auth.logout(account_id)
-            self.app.store.delete(account_id)
+            with self.app.account_lock(account_id):
+                self.app.auth.cancel(account_id)
+                self.app.auth.logout(account_id)
+                self.app.store.delete(account_id)
             return self._json(200, {"deleted": True})
         except KeyError:
             return self._error(404, "账号不存在")
@@ -828,47 +1057,48 @@ class Handler(SimpleHTTPRequestHandler):
             path = base_path + path
         return urlunsplit((parsed.scheme, parsed.netloc, path, local.query, ""))
 
-    def _proxy(self, body: bytes) -> None:
-        with self.app.route_lock:
-            candidates = self.app.store.candidates()
+    def _proxy(self, body: bytes, group_id: str) -> None:
+        with self.app.route_lock(group_id):
+            candidates = self.app.store.candidates(group_id)
             if not candidates:
-                return self._error(503, "没有可用账号，请先完成授权或重置账号状态", "accounts_unavailable")
+                return self._error(503, "该分组没有可用账号", "group_accounts_unavailable")
             last_message = "所有账号均不可用"
             for account in candidates:
-                try:
-                    status, reason, headers, payload, connection, response = self._attempt(
-                        account, body, refresh=True
+                with self.app.account_lock(account["id"]):
+                    try:
+                        status, reason, headers, payload, connection, response = self._attempt(
+                            account, body, refresh=True
+                        )
+                    except RuntimeError as exc:
+                        return self._error(502, str(exc), "upstream_error")
+                    if status == 401:
+                        self.app.store.update(account["id"], state="error", last_error="官方认证已失效")
+                        last_message = "账号认证已失效"
+                        if connection:
+                            connection.close()
+                        continue
+                    error_body = payload.decode("utf-8", errors="replace").lower()
+                    quota_denied = status in {402, 429} or (
+                        status == 403 and any(marker in error_body for marker in QUOTA_MARKERS)
                     )
-                except RuntimeError as exc:
-                    return self._error(502, str(exc), "upstream_error")
-                if status == 401:
-                    self.app.store.update(account["id"], state="error", last_error="官方认证已失效")
-                    last_message = "账号认证已失效"
-                    if connection:
-                        connection.close()
-                    continue
-                error_body = payload.decode("utf-8", errors="replace").lower()
-                quota_denied = status in {402, 429} or (
-                    status == 403 and any(marker in error_body for marker in QUOTA_MARKERS)
-                )
-                if quota_denied:
-                    exhausted = status == 402 or any(marker in error_body for marker in QUOTA_MARKERS)
-                    self.app.store.update(
-                        account["id"],
-                        state="exhausted" if exhausted else "cooldown",
-                        retry_after=None if exhausted else time.time() + 60,
-                        last_error="额度已耗尽" if exhausted else "触发速率限制，60 秒后恢复",
-                    )
-                    last_message = "账号额度已耗尽" if exhausted else "账号暂时限流"
-                    if connection:
-                        connection.close()
-                    continue
-                if status == 403:
+                    if quota_denied:
+                        exhausted = status == 402 or any(marker in error_body for marker in QUOTA_MARKERS)
+                        self.app.store.update(
+                            account["id"],
+                            state="exhausted" if exhausted else "cooldown",
+                            retry_after=None if exhausted else time.time() + 60,
+                            last_error="额度已耗尽" if exhausted else "触发速率限制，60 秒后恢复",
+                        )
+                        last_message = "账号额度已耗尽" if exhausted else "账号暂时限流"
+                        if connection:
+                            connection.close()
+                        continue
+                    if status == 403:
+                        return self._send_upstream(status, reason, headers, payload, response)
+                    if status >= 500:
+                        return self._send_upstream(status, reason, headers, payload, response)
+                    self.app.store.mark_used(account["id"], group_id)
                     return self._send_upstream(status, reason, headers, payload, response)
-                if status >= 500:
-                    return self._send_upstream(status, reason, headers, payload, response)
-                self.app.store.mark_used(account["id"])
-                return self._send_upstream(status, reason, headers, payload, response)
             return self._error(429, last_message, "accounts_exhausted")
 
     def _attempt(self, account: dict, body: bytes, refresh: bool):

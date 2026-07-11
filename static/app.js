@@ -1,6 +1,10 @@
 const $ = (selector) => document.querySelector(selector);
 const PAGE_SIZE = 4;
-const state = { accounts: [], activeId: null, config: null, authId: null, deleteId: null, poll: null, page: 0, integration: "zcode" };
+const state = {
+  accounts: [], groups: [], groupId: "default", activeId: null, config: null,
+  authId: null, deleteTarget: null, moveId: null, poll: null, page: 0,
+  integration: "zcode", drawerTrigger: "#open-details",
+};
 
 const statusNames = {
   pending: "待授权",
@@ -12,6 +16,43 @@ const statusNames = {
 };
 
 const membershipNames = { lite: "Lite", super: "Super", heavy: "Heavy", unknown: "未标注" };
+
+function currentGroup() {
+  return state.groups.find((group) => group.id === state.groupId) || null;
+}
+
+function fillGroupSelect(select, selectedId = state.groupId, excludedId = null) {
+  const groups = state.groups.filter((group) => group.id !== excludedId);
+  const signature = JSON.stringify(groups.map((group) => [group.id, group.name]));
+  if (select.dataset.signature !== signature) {
+    select.replaceChildren();
+    for (const group of groups) {
+      const option = document.createElement("option");
+      option.value = group.id;
+      option.textContent = group.name;
+      select.append(option);
+    }
+    select.dataset.signature = signature;
+  }
+  if (selectedId && groups.some((group) => group.id === selectedId)) select.value = selectedId;
+}
+
+function renderGroupControls() {
+  const group = currentGroup();
+  if (!group) return;
+  fillGroupSelect($("#group-select"));
+  const accountGroup = $("#account-group");
+  const pendingGroup = $("#account-dialog").open ? accountGroup.value : state.groupId;
+  fillGroupSelect(accountGroup, pendingGroup || state.groupId);
+  $("#provider-group-name").textContent = `${group.name} · 连接信息`;
+  if (document.activeElement !== $("#rename-group-name")) $("#rename-group-name").value = group.name;
+  $("#group-account-count").textContent = group.account_count;
+  $("#group-ready-count").textContent = group.ready_count;
+  const deleteButton = $("#delete-group");
+  deleteButton.hidden = group.is_default;
+  deleteButton.disabled = group.account_count > 0;
+  deleteButton.textContent = group.account_count > 0 ? `先移走 ${group.account_count} 个账号` : "删除当前分组";
+}
 
 function addedAtLabel(value) {
   if (!value) return "添加时间未知";
@@ -123,6 +164,7 @@ function renderAccounts() {
     if (account.state === "ready" && account.id !== state.activeId && account.enabled) actions.append(createButton("设为当前", "select", account.id));
     if (account.state === "ready") actions.append(createButton(account.enabled ? "停用" : "启用", "toggle", account.id));
     if (!["pending", "authorizing"].includes(account.state)) actions.append(createButton("刷新额度", "usage", account.id));
+    if (state.groups.length > 1) actions.append(createButton("移动", "move", account.id));
     actions.append(createButton("删除", "delete", account.id, "danger"));
     row.append(identity, actions);
     list.append(row);
@@ -136,6 +178,7 @@ function renderAccounts() {
 
 function renderConfig() {
   if (!state.config) return;
+  renderGroupControls();
   $("#provider-url").value = state.config.provider_url;
   $("#provider-key").value = state.config.api_key;
   $("#client-example").textContent = `OPENAI_BASE_URL=${state.config.provider_url}\nOPENAI_API_KEY=sgr_••••••••••••`;
@@ -179,8 +222,11 @@ function updateAuthDialog() {
 
 async function load() {
   try {
-    const [accounts, config] = await Promise.all([api("/api/accounts"), api("/api/config")]);
+    const query = `?group_id=${encodeURIComponent(state.groupId)}`;
+    const [accounts, config] = await Promise.all([api(`/api/accounts${query}`), api(`/api/config${query}`)]);
     state.accounts = accounts.accounts;
+    state.groups = accounts.groups;
+    state.groupId = accounts.selected_group_id;
     state.activeId = accounts.active_id;
     state.config = config;
     renderAccounts();
@@ -207,6 +253,7 @@ function openCreateDialog() {
   $("#create-step").hidden = false;
   $("#auth-step").hidden = true;
   $("#account-form").reset();
+  fillGroupSelect($("#account-group"));
   $("#account-dialog").showModal();
   $("#account-name").focus();
 }
@@ -214,12 +261,39 @@ function openCreateDialog() {
 function openDeleteDialog(id) {
   const account = state.accounts.find((item) => item.id === id);
   if (!account) return toast("账号已不存在，请刷新后重试", true);
-  state.deleteId = id;
-  $("#delete-account-name").textContent = account.name;
+  state.deleteTarget = { type: "account", id };
+  $("#delete-kicker").textContent = "删除账号";
+  $("#delete-target-name").textContent = account.name;
+  $("#delete-description").textContent = "该账号的本机授权文件会一并清除，此操作无法撤销。";
   $("#delete-error").hidden = true;
   $("#delete-error").textContent = "";
   $("#delete-dialog").showModal();
   $("#cancel-delete").focus();
+}
+
+function openGroupDeleteDialog() {
+  const group = currentGroup();
+  if (!group || group.is_default || group.account_count) return;
+  state.deleteTarget = { type: "group", id: group.id };
+  $("#delete-kicker").textContent = "删除分组";
+  $("#delete-target-name").textContent = group.name;
+  $("#delete-description").textContent = "该分组的 API Key 将立即失效，此操作无法撤销。";
+  $("#delete-error").hidden = true;
+  $("#delete-error").textContent = "";
+  $("#delete-dialog").showModal();
+  $("#cancel-delete").focus();
+}
+
+function openMoveDialog(id) {
+  const account = state.accounts.find((item) => item.id === id);
+  if (!account) return toast("账号已不存在，请刷新后重试", true);
+  state.moveId = id;
+  $("#move-account-name").textContent = account.name;
+  fillGroupSelect($("#move-group"), null, account.group_id);
+  $("#move-error").hidden = true;
+  $("#move-error").textContent = "";
+  $("#move-dialog").showModal();
+  $("#move-group").focus();
 }
 
 async function mutate(path, method = "POST", body = {}) {
@@ -230,23 +304,38 @@ async function mutate(path, method = "POST", body = {}) {
 }
 
 $("#add-account").addEventListener("click", openCreateDialog);
+$("#group-select").addEventListener("change", async (event) => {
+  state.groupId = event.target.value;
+  state.page = 0;
+  await load();
+});
 $("#page-prev").addEventListener("click", () => { state.page -= 1; renderAccounts(); });
 $("#page-next").addEventListener("click", () => { state.page += 1; renderAccounts(); });
 $("#open-details").addEventListener("click", () => {
+  state.drawerTrigger = "#open-details";
   $("#drawer-backdrop").hidden = false;
   $("#details-drawer").hidden = false;
   $("#close-details").focus();
+});
+$("#manage-groups").addEventListener("click", () => {
+  state.drawerTrigger = "#manage-groups";
+  $("#drawer-backdrop").hidden = false;
+  $("#groups-drawer").hidden = false;
+  renderGroupControls();
+  $("#close-groups").focus();
 });
 function hideDrawers() {
   $("#drawer-backdrop").hidden = true;
   $("#details-drawer").hidden = true;
   $("#integration-drawer").hidden = true;
+  $("#groups-drawer").hidden = true;
 }
 function closeDetails() {
   hideDrawers();
-  $("#open-details").focus();
+  $(state.drawerTrigger)?.focus();
 }
 $("#close-details").addEventListener("click", closeDetails);
+$("#close-groups").addEventListener("click", closeDetails);
 $("#drawer-backdrop").addEventListener("click", closeDetails);
 $("#open-integrations").addEventListener("click", () => {
   $("#details-drawer").hidden = true;
@@ -267,7 +356,9 @@ document.querySelectorAll("[data-integration]").forEach((button) => {
   });
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && (!$("#details-drawer").hidden || !$("#integration-drawer").hidden)) closeDetails();
+  if (event.key === "Escape" && (
+    !$("#details-drawer").hidden || !$("#integration-drawer").hidden || !$("#groups-drawer").hidden
+  )) closeDetails();
 });
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
@@ -288,6 +379,7 @@ document.addEventListener("click", async (event) => {
   const { action, id } = button.dataset;
   if (!action || !id) return;
   if (action === "delete") return openDeleteDialog(id);
+  if (action === "move") return openMoveDialog(id);
   button.disabled = true;
   try {
     if (action === "authorize") {
@@ -309,21 +401,29 @@ document.addEventListener("click", async (event) => {
 });
 
 $("#cancel-delete").addEventListener("click", () => {
-  state.deleteId = null;
+  state.deleteTarget = null;
   $("#delete-dialog").close();
 });
 $("#confirm-delete").addEventListener("click", async () => {
-  if (!state.deleteId) return;
+  if (!state.deleteTarget) return;
   const button = $("#confirm-delete");
   const errorNode = $("#delete-error");
   button.disabled = true;
   button.textContent = "删除中...";
   errorNode.hidden = true;
   try {
-    await mutate(`/api/accounts/${state.deleteId}`, "DELETE");
-    state.deleteId = null;
+    if (state.deleteTarget.type === "group") {
+      await api(`/api/groups/${state.deleteTarget.id}`, { method: "DELETE" });
+      state.groupId = "default";
+      await load();
+      closeDetails();
+      toast("分组已删除");
+    } else {
+      await mutate(`/api/accounts/${state.deleteTarget.id}`, "DELETE");
+      toast("账号已删除");
+    }
+    state.deleteTarget = null;
     $("#delete-dialog").close();
-    toast("账号已删除");
   } catch (error) {
     errorNode.textContent = error.message;
     errorNode.hidden = false;
@@ -332,6 +432,65 @@ $("#confirm-delete").addEventListener("click", async () => {
     button.textContent = "确认删除";
   }
 });
+
+$("#cancel-move").addEventListener("click", () => {
+  state.moveId = null;
+  $("#move-dialog").close();
+});
+$("#confirm-move").addEventListener("click", async () => {
+  if (!state.moveId) return;
+  const button = $("#confirm-move");
+  const errorNode = $("#move-error");
+  button.disabled = true;
+  errorNode.hidden = true;
+  try {
+    await mutate(`/api/accounts/${state.moveId}/move`, "POST", { group_id: $("#move-group").value });
+    state.moveId = null;
+    $("#move-dialog").close();
+    toast("账号已移动");
+  } catch (error) {
+    errorNode.textContent = error.message;
+    errorNode.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#create-group-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    const group = await api("/api/groups", {
+      method: "POST",
+      body: JSON.stringify({ name: $("#new-group-name").value }),
+    });
+    state.groupId = group.id;
+    state.page = 0;
+    $("#new-group-name").value = "";
+    await load();
+    toast("分组已创建");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#rename-group-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    await mutate(`/api/groups/${state.groupId}/rename`, "POST", { name: $("#rename-group-name").value });
+    toast("分组已重命名");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+$("#delete-group").addEventListener("click", openGroupDeleteDialog);
 
 $("#account-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -343,6 +502,7 @@ $("#account-form").addEventListener("submit", async (event) => {
       body: JSON.stringify({
         name: $("#account-name").value,
         membership_type: $("#membership-type").value,
+        group_id: $("#account-group").value,
       }),
     });
     state.authId = account.id;
