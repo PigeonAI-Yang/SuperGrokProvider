@@ -311,10 +311,11 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .model-heading .drawer-label { margin: 0; }
 .model-heading span { color: var(--muted); font-size: 11px; }
 .model-heading span.error { color: var(--danger); }
-.model-list { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 7px; margin-top: 8px; color: var(--muted); font-size: 9px; }
-.model-list > div { min-width: 0; padding: 5px 7px; border: 1px solid var(--line); border-radius: 9px; background: #0e1211; }
+.model-list { display: grid; margin-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.model-list > div { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); align-items: center; gap: 10px; min-width: 0; padding: 6px 4px; border-bottom: 1px solid var(--line); }
 .model-list strong, .model-list span { display: block; overflow-wrap: anywhere; }
-.model-list strong { margin-bottom: 2px; color: var(--text); font: 600 9px/1.25 ui-monospace, "Cascadia Mono", monospace; }
+.model-list strong { color: var(--text); font: 600 10.5px/1.25 ui-monospace, "Cascadia Mono", monospace; }
+.model-list span { text-align: right; line-height: 1.25; }
 .drawer-label { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
 .groups-drawer { overflow: hidden; }
 .group-section { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }

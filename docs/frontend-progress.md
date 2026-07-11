@@ -21,6 +21,7 @@ Delivered
 - ZCODE, GROK BUILD and HERMES now have independent Provider keys and Agent-level route locks. Each Agent supports ordered account-group fallback, isolation toggles, reordering, create/rename/delete and cross-Agent account moves.
 - Account rows now open a keyboard-accessible details drawer; account names can be validated and persisted without reauthorization.
 - The account drawer now queries live xAI models and labels documented reasoning effort, fixed reasoning and non-applicable media models without guessing unknown levels. Transient transport failures retry twice; quota-blocked accounts show an explicit same-Agent reference result.
+- Model availability uses a full-width compact table so model names and reasoning levels remain readable without adding drawer scrolling.
 
 ## Current Loop
 
