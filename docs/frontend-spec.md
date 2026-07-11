@@ -6,6 +6,7 @@
 - Authorization uses `grok login --device-auth` under an isolated `GROK_HOME`.
 - Show official URL and one-time code while pending.
 - Open account details from the account row; rename with inline validation and persistent failure feedback.
+- Query `/v1/models` with the selected account's own token and show its model IDs with documented reasoning controls. Retry transient transport failures twice; if quota/auth blocks the selected account, use a healthy account from the same Agent and label the result as an Agent reference. Unknown controls remain explicitly unclaimed.
 - Select active account, enable/disable, reset exhausted/error state and delete.
 - Show at most four accounts per page so the fixed-height window never needs an internal list scrollbar.
 - Filter the account list by the selected Agent and group, and support moving an account to any group.

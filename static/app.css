@@ -294,6 +294,8 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
   background: #121615;
   box-shadow: -24px 0 70px rgb(0 0 0 / 0.4);
 }
+#account-drawer { padding-top: 22px; padding-bottom: 22px; }
+#account-drawer .group-section { margin-top: 18px; padding-top: 16px; }
 .drawer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .drawer-heading h2 { margin: 0; font-size: 26px; }
 .drawer-heading button { min-height: 34px; color: var(--muted); background: transparent; border-color: var(--line); }
@@ -301,6 +303,18 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .detail-list > div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 16px; padding: 15px 0; border-bottom: 1px solid var(--line); }
 .detail-list dt { color: var(--muted); font-size: 12px; }
 .detail-list dd { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 13px; }
+.account-meta { grid-template-columns: 1fr 1fr; gap: 0 18px; margin: 12px 0; }
+.account-meta > div { display: block; padding: 6px 0; }
+.account-meta dt { margin-bottom: 4px; }
+.account-models { padding-top: 10px; border-top: 1px solid var(--line); }
+.model-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.model-heading .drawer-label { margin: 0; }
+.model-heading span { color: var(--muted); font-size: 11px; }
+.model-heading span.error { color: var(--danger); }
+.model-list { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 7px; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.model-list > div { min-width: 0; padding: 5px 7px; border: 1px solid var(--line); border-radius: 9px; background: #0e1211; }
+.model-list strong, .model-list span { display: block; overflow-wrap: anywhere; }
+.model-list strong { margin-bottom: 2px; color: var(--text); font: 600 9px/1.25 ui-monospace, "Cascadia Mono", monospace; }
 .drawer-label { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
 .groups-drawer { overflow: hidden; }
 .group-section { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }

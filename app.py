@@ -34,6 +34,24 @@ QUOTA_MARKERS = (
 )
 
 
+def model_reasoning_capability(model_id: str) -> str:
+    if model_id == "grok-4.5":
+        return "低 / 中 / 高（默认高）"
+    if model_id == "grok-4.3":
+        return "无 / 低 / 中 / 高（默认低）"
+    if model_id.startswith("grok-4.20-multi-agent"):
+        return "low / medium / high / xhigh（控制 Agent 数）"
+    if model_id.endswith("-non-reasoning"):
+        return "固定关闭"
+    if model_id.endswith("-reasoning"):
+        return "固定开启"
+    if model_id == "grok-build-0.1":
+        return "支持推理，强度未声明"
+    if model_id.startswith("grok-imagine-"):
+        return "不适用"
+    return "未声明"
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -1180,6 +1198,17 @@ class Handler(SimpleHTTPRequestHandler):
                 except KeyError:
                     return self._error(404, "Agent 或分组不存在")
             return
+        account_models_match = re.fullmatch(r"/api/accounts/([0-9a-f]{32})/models", path)
+        if account_models_match:
+            if not self._management_guard():
+                return
+            account_id = account_models_match.group(1)
+            try:
+                return self._json(200, self._account_models(account_id))
+            except KeyError:
+                return self._error(404, "账号不存在")
+            except RuntimeError as exc:
+                return self._error(502, str(exc), "upstream_error")
         if path == "/api/agents":
             if self._management_guard():
                 return self._json(200, {"agents": self.app.store.agents()})
@@ -1362,6 +1391,74 @@ class Handler(SimpleHTTPRequestHandler):
         else:
             path = base_path + path
         return urlunsplit((parsed.scheme, parsed.netloc, path, local.query, ""))
+
+    def _account_models(self, account_id: str) -> dict:
+        account = self.app.store.get(account_id)
+        if not account:
+            raise KeyError(account_id)
+        try:
+            with self.app.account_lock(account_id):
+                return {"models": self._fetch_account_models(account_id), "source": "account"}
+        except PermissionError as selected_error:
+            group = self.app.store.group_config(account.get("group_id", "default"))
+            for fallback_group in self.app.store.routing_groups(group["agent_id"]):
+                for fallback in self.app.store.candidates(fallback_group["id"]):
+                    if fallback["id"] == account_id:
+                        continue
+                    try:
+                        with self.app.account_lock(fallback["id"]):
+                            return {"models": self._fetch_account_models(fallback["id"]), "source": "agent"}
+                    except PermissionError:
+                        continue
+            raise RuntimeError(str(selected_error)) from selected_error
+
+    def _fetch_account_models(self, account_id: str, refresh: bool = True) -> list[dict]:
+        try:
+            target = self.app.upstream + ("/models" if self.app.upstream.endswith("/v1") else "/v1/models")
+            network_failures = 0
+            refreshed = False
+            while True:
+                _, token = read_auth_identity(self.app.store.account_home(account_id))
+                request = Request(
+                    target,
+                    headers={"Authorization": "Bearer " + (token or ""), "Accept": "application/json"},
+                )
+                try:
+                    with open_with_system_proxy(request, timeout=30) as response:
+                        payload = json.load(response)
+                    break
+                except HTTPError as exc:
+                    if exc.code == 401 and refresh and not refreshed and self.app.auth.refresh(account_id):
+                        refreshed = True
+                        continue
+                    detail = exc.read().decode("utf-8", errors="replace")[:300]
+                    if exc.code in {401, 402, 429} or (
+                        exc.code == 403 and any(marker in detail.lower() for marker in QUOTA_MARKERS)
+                    ):
+                        raise PermissionError(f"模型接口返回 {exc.code}: {detail}") from exc
+                    raise RuntimeError(f"模型接口返回 {exc.code}: {detail}") from exc
+                except (OSError, URLError, HTTPException, json.JSONDecodeError) as exc:
+                    network_failures += 1
+                    if network_failures == 3:
+                        raise RuntimeError(f"模型查询失败: {exc}") from exc
+                    time.sleep(network_failures + secrets.randbelow(2))
+            models = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(models, list):
+                raise RuntimeError("模型接口响应格式无效")
+            return [
+                {
+                    "id": model["id"],
+                    "reasoning": model_reasoning_capability(model["id"]),
+                }
+                for model in models
+                if isinstance(model, dict) and isinstance(model.get("id"), str)
+            ]
+        except RuntimeError:
+            raise
+        except PermissionError:
+            raise
+        except (OSError, URLError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"模型查询失败: {exc}") from exc
 
     def _proxy(self, body: bytes, agent_id: str) -> None:
         with self.app.route_lock(agent_id):

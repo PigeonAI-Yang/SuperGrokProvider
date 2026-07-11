@@ -451,6 +451,74 @@ class ProviderRotationTests(unittest.TestCase):
             urllib.request.urlopen(duplicate, timeout=5)
         self.assertEqual(error.exception.code, 400)
 
+    def test_account_models_use_selected_account_and_describe_reasoning(self):
+        home = self.store.account_home(self.first["id"])
+        (home / "auth.json").write_text(json.dumps({"xai": {"key": "selected-token"}}), encoding="utf-8")
+        payload = {
+            "data": [
+                {"id": "grok-4.5"},
+                {"id": "grok-4.3"},
+                {"id": "grok-4.20-multi-agent-0309"},
+                {"id": "grok-4.20-0309-non-reasoning"},
+            ]
+        }
+        with patch.object(app, "open_with_system_proxy", return_value=FakeResponse(payload)) as opener:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.server.server_port}/api/accounts/{self.first['id']}/models",
+                timeout=5,
+            ) as response:
+                result = json.load(response)
+                models = result["models"]
+        self.assertEqual(opener.call_args.args[0].headers["Authorization"], "Bearer selected-token")
+        self.assertEqual(result["source"], "account")
+        self.assertIn("默认高", models[0]["reasoning"])
+        self.assertIn("默认低", models[1]["reasoning"])
+        self.assertIn("Agent 数", models[2]["reasoning"])
+        self.assertEqual(models[3]["reasoning"], "固定关闭")
+
+    def test_account_models_fall_back_with_explicit_agent_source_when_selected_quota_is_blocked(self):
+        for account, token in ((self.first, "blocked-token"), (self.second, "healthy-token")):
+            home = self.store.account_home(account["id"])
+            (home / "auth.json").write_text(json.dumps({"xai": {"key": token}}), encoding="utf-8")
+        quota = urllib.error.HTTPError(
+            "https://api.x.ai/v1/models",
+            403,
+            "Forbidden",
+            {},
+            io.BytesIO(b'{"code":"personal-team-blocked:spending-limit"}'),
+        )
+        with patch.object(
+            app,
+            "open_with_system_proxy",
+            side_effect=[quota, FakeResponse({"data": [{"id": "grok-4.5"}]})],
+        ):
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.server.server_port}/api/accounts/{self.first['id']}/models",
+                timeout=5,
+            ) as response:
+                result = json.load(response)
+        self.assertEqual(result["source"], "agent")
+        self.assertEqual(result["models"][0]["id"], "grok-4.5")
+
+    def test_account_models_retry_transient_transport_failure(self):
+        home = self.store.account_home(self.first["id"])
+        (home / "auth.json").write_text(json.dumps({"xai": {"key": "token"}}), encoding="utf-8")
+        with patch.object(
+            app,
+            "open_with_system_proxy",
+            side_effect=[urllib.error.URLError("ssl eof"), FakeResponse({"data": [{"id": "grok-4.3"}]})],
+        ) as opener, patch.object(app.time, "sleep") as sleep, patch.object(
+            app.secrets, "randbelow", return_value=0
+        ):
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.server.server_port}/api/accounts/{self.first['id']}/models",
+                timeout=5,
+            ) as response:
+                result = json.load(response)
+        self.assertEqual(result["models"][0]["id"], "grok-4.3")
+        self.assertEqual(opener.call_count, 2)
+        sleep.assert_called_once_with(1)
+
     def test_management_agent_and_group_lifecycle(self):
         create = urllib.request.Request(
             f"http://127.0.0.1:{self.server.server_port}/api/agents",

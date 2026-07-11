@@ -382,6 +382,35 @@ function openAccountDrawer(id) {
   $("#account-drawer-created").textContent = addedAtLabel(account.created_at).replace("添加于 ", "");
   $("#rename-account-error").hidden = true;
   $("#rename-account-name").focus();
+  loadAccountModels(id);
+}
+
+async function loadAccountModels(id) {
+  const stateNode = $("#account-model-state");
+  const list = $("#account-model-list");
+  stateNode.textContent = "正在查询";
+  stateNode.className = "";
+  list.replaceChildren();
+  try {
+    const result = await api(`/api/accounts/${id}/models`);
+    if (state.accountDrawerId !== id) return;
+    const source = result.source === "account" ? "当前账号" : "Agent 参考";
+    stateNode.textContent = result.models.length ? `${result.models.length} 个 · ${source}` : "暂无模型";
+    for (const model of result.models) {
+      const item = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = model.id;
+      const reasoning = document.createElement("span");
+      reasoning.textContent = model.reasoning;
+      item.append(name, reasoning);
+      list.append(item);
+    }
+  } catch (error) {
+    if (state.accountDrawerId !== id) return;
+    stateNode.textContent = "查询失败";
+    stateNode.className = "error";
+    list.textContent = error.message;
+  }
 }
 
 async function mutate(path, method = "POST", body = {}) {

@@ -195,12 +195,19 @@
       </form>
       <p id="rename-account-error" class="inline-error" role="alert" hidden></p>
     </section>
-    <dl class="detail-list">
+    <dl class="detail-list account-meta">
       <div><dt>登录邮箱</dt><dd id="account-drawer-email"></dd></div>
       <div><dt>会员类型</dt><dd id="account-drawer-membership"></dd></div>
       <div><dt>所属位置</dt><dd id="account-drawer-location"></dd></div>
       <div><dt>添加时间</dt><dd id="account-drawer-created"></dd></div>
     </dl>
+    <section class="account-models" aria-labelledby="account-models-title">
+      <div class="model-heading">
+        <p class="drawer-label" id="account-models-title">可用模型与推理强度</p>
+        <span id="account-model-state">正在查询</span>
+      </div>
+      <div id="account-model-list" class="model-list"></div>
+    </section>
   </aside>
 
   <aside id="details-drawer" class="details-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
