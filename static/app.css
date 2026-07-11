@@ -213,8 +213,12 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .account-title-line { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 7px; }
 .account-title-line h3 { margin: 0; font-size: 16px; }
 .account-email { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
-.account-usage { margin-top: 5px; color: var(--accent); font: 600 11px/1.35 ui-monospace, "Cascadia Mono", monospace; }
+.account-usage { display: flex; align-items: center; gap: 8px; margin-top: 5px; color: var(--accent); font: 600 11px/1.35 ui-monospace, "Cascadia Mono", monospace; }
 .account-usage.error { color: var(--danger); }
+.usage-meter { width: 92px; height: 6px; overflow: hidden; border-radius: 999px; background: var(--line); }
+.usage-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.usage-meter.exhausted > span { background: var(--danger); }
+.account-usage strong { min-width: 43px; color: var(--text); font: inherit; }
 .account-error { margin: 8px 0 0; color: var(--danger); font-size: 12px; }
 .badge {
   display: inline-flex;
