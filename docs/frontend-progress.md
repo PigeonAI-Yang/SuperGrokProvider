@@ -22,6 +22,7 @@ Delivered
 - Account rows now open a keyboard-accessible details drawer; account names can be validated and persisted without reauthorization.
 - The account drawer now queries live xAI models and labels documented reasoning effort, fixed reasoning and non-applicable media models without guessing unknown levels. Transient transport failures retry twice; quota-blocked accounts show an explicit same-Agent reference result.
 - Model availability uses a full-width compact table so model names and reasoning levels remain readable without adding drawer scrolling.
+- Zcode configuration now mirrors the locally verified working `Grok Local` contract: `openai-compatible` plus `reasoning.variants/defaultVariant`.
 
 ## Current Loop
 

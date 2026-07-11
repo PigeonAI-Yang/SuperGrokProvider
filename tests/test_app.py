@@ -57,9 +57,9 @@ class IntegrationConfigTests(unittest.TestCase):
         payload = json.loads(self.configs["zcode"]["content"])
         model = payload["provider"]["supergrok-router"]["models"]["grok-4.5"]
         reasoning = model["reasoning"]
-        self.assertEqual(reasoning["levels"], ["low", "medium", "high"])
-        self.assertEqual(reasoning["defaultLevel"], "high")
-        self.assertEqual(reasoning["providerOptionsByLevel"]["medium"]["reasoningEffort"], "medium")
+        self.assertEqual(payload["provider"]["supergrok-router"]["kind"], "openai-compatible")
+        self.assertEqual(reasoning["variants"], ["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+        self.assertEqual(reasoning["defaultVariant"], "medium")
         self.assertEqual(payload["provider"]["supergrok-router"]["options"]["apiKey"], self.key)
 
     def test_hermes_and_grok_build_use_responses_reasoning_contracts(self):
