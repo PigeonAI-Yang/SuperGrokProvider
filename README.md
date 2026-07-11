@@ -1,6 +1,6 @@
 # SuperGrok Router
 
-一个不限账号数量的本机 SuperGrok 账号池。每个账号通过官方 Grok Build 设备授权登录，对外提供一个稳定的 OpenAI-compatible Provider。
+一个不限账号数量的本机 SuperGrok 账号路由器。每个账号通过官方 Grok Build 设备授权登录，并按 Agent 和账号组组织成稳定的 OpenAI-compatible Provider。
 
 ## 启动
 
@@ -29,7 +29,7 @@ cd C:\path\to\supergrok-router
 1. 在管理页点击“添加账号”。
 2. 输入本机显示名称并选择会员类型（Lite / Super / Heavy）。
 3. 打开 UI 给出的 xAI 官方地址，登录并确认一次性代码。
-4. 在 Agent 中填写管理页显示的 Base URL 和 API Key。
+4. 切到对应 Agent 分页，把管理页显示的 Base URL 和该 Agent 的 API Key 填入客户端。
 
 “连接详情 → Zcode / Hermes / Grok Build 配置”提供三套可复制片段。它们按各客户端的真实字段分别发送推理强度，同时 Router 保持透明转发、不按客户端改写请求：
 
@@ -39,14 +39,14 @@ cd C:\path\to\supergrok-router
 
 当前只为官方支持强度调节的 `grok-4.5` 声明这些能力，不会给 Composer 模型伪造推理开关。
 
-## 账号分组
+## Agent 与账号组
 
-- 分组名称可自定义，例如 Zcode、Codex；每个账号只属于一个分组。
-- 所有分组使用同一个 Base URL，但各自拥有独立 API Key；Key 决定请求进入哪个账号池。
-- 请求只在目标组内轮换。空组或整组额度耗尽时直接报错，不会跨组借用账号。
-- 组内请求串行，组间可以并行；账号移动期间仍由账号锁防止同号并发。
-- 默认组保留旧版 API Key，升级后现有客户端配置继续可用。
-- 管理页支持新建、重命名、删除空组，以及在组间移动账号；Provider 和客户端配置随当前组切换。
+- 顶部 ZCODE、GROK BUILD、HERMES 分页分别代表独立 Agent；每个 Agent 拥有一个 API Key、自己的串行路由锁和若干账号组。
+- 同一 Agent 内，启用的账号组按界面顺序自动兜底：先在当前组内选择健康账号，额度或授权不可用时才进入下一组。
+- 每个组都可独立隔离或重新启用。隔离只跳过路由，账号和授权数据仍保留；上移、下移可调整兜底顺序。
+- 一个账号只属于一个组，但可以移动到任意 Agent 的任意组。不同 Agent 可以并行，同一 Agent 的请求串行，流式响应期间保持账号锁。
+- 升级旧数据时，原 API Key、当前账号和所有既有账号迁入 ZCODE；现有 Zcode 客户端配置继续可用。
+- 管理页支持新建、重命名、删除空账号组；Provider 连接信息随 Agent 分页切换，不随组切换。
 
 支持的透明代理路径：
 

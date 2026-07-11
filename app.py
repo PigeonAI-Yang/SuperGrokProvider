@@ -71,10 +71,10 @@ def release_singleton_mutex(mutex) -> None:
 
 
 def integration_configs(
-    provider_url: str, api_key: str, group_id: str = "default", group_name: str = "默认组"
+    provider_url: str, api_key: str, agent_id: str = "zcode", agent_name: str = "ZCODE"
 ) -> dict[str, dict[str, str]]:
-    provider_key = "supergrok-router" if group_id == "default" else f"supergrok-router-{group_id[:8]}"
-    provider_name = f"SuperGrok Router · {group_name}"
+    provider_key = "supergrok-router" if agent_id == "zcode" else f"supergrok-router-{agent_id[:8]}"
+    provider_name = f"SuperGrok Router · {agent_name}"
     quoted_url = json.dumps(provider_url, ensure_ascii=False)
     quoted_key = json.dumps(api_key, ensure_ascii=False)
     quoted_name = json.dumps(provider_name, ensure_ascii=False)
@@ -216,38 +216,111 @@ class AccountStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.accounts_root.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
-            atomic_write_json(
-                self.path,
-                {
-                    "version": 2,
-                    "groups": [self._new_group("默认组", "default")],
-                    "accounts": [],
-                },
-            )
+            atomic_write_json(self.path, self._new_state())
         else:
             data = self._read()
             if data.get("version", 1) < 2:
-                self._write(self._migrate_v1(data))
+                data = self._migrate_v1(data)
+            if data.get("version", 2) < 3:
+                data = self._migrate_v2(data)
+            if data != self._read():
+                self._write(data)
 
     @staticmethod
-    def _new_group(name: str, group_id: str | None = None) -> dict:
+    def _new_agent(
+        name: str, kind: str, agent_id: str | None = None, api_key: str | None = None
+    ) -> dict:
+        return {
+            "id": agent_id or uuid.uuid4().hex,
+            "name": name,
+            "kind": kind,
+            "api_key": api_key or "sgr_" + secrets.token_urlsafe(32),
+            "active_group_id": None,
+            "created_at": utc_now(),
+        }
+
+    @staticmethod
+    def _new_group(
+        name: str, agent_id: str, group_id: str | None = None, position: int = 0
+    ) -> dict:
         return {
             "id": group_id or uuid.uuid4().hex,
+            "agent_id": agent_id,
             "name": name,
-            "api_key": "sgr_" + secrets.token_urlsafe(32),
+            "enabled": True,
+            "position": position,
             "active_id": None,
             "created_at": utc_now(),
         }
 
     @classmethod
+    def _new_state(cls) -> dict:
+        agents = [
+            cls._new_agent("ZCODE", "zcode", "zcode"),
+            cls._new_agent("GROK BUILD", "grok_build", "grok-build"),
+            cls._new_agent("HERMES", "hermes", "hermes"),
+        ]
+        groups = [
+            cls._new_group("默认组", agent["id"], "default" if agent["id"] == "zcode" else None)
+            for agent in agents
+        ]
+        for agent, group in zip(agents, groups):
+            agent["active_group_id"] = group["id"]
+        return {"version": 3, "agents": agents, "groups": groups, "accounts": []}
+
+    @classmethod
     def _migrate_v1(cls, data: dict) -> dict:
-        group = cls._new_group("默认组", "default")
-        group["api_key"] = data.get("api_key") or group["api_key"]
-        group["active_id"] = data.get("active_id")
+        group = {
+            "id": "default",
+            "name": "默认组",
+            "api_key": data.get("api_key") or "sgr_" + secrets.token_urlsafe(32),
+            "active_id": data.get("active_id"),
+            "created_at": utc_now(),
+        }
         accounts = data.get("accounts") if isinstance(data.get("accounts"), list) else []
         for account in accounts:
             account["group_id"] = "default"
         return {"version": 2, "groups": [group], "accounts": accounts}
+
+    @classmethod
+    def _migrate_v2(cls, data: dict) -> dict:
+        old_groups = data.get("groups") if isinstance(data.get("groups"), list) else []
+        accounts = data.get("accounts") if isinstance(data.get("accounts"), list) else []
+        agents: list[dict] = []
+        groups: list[dict] = []
+        default = next((group for group in old_groups if group.get("id") == "default"), None)
+        zcode = cls._new_agent(
+            "ZCODE", "zcode", "zcode", (default or {}).get("api_key")
+        )
+        if default:
+            migrated = {key: value for key, value in default.items() if key != "api_key"}
+            migrated.update(agent_id="zcode", enabled=True, position=0)
+        else:
+            migrated = cls._new_group("默认组", "zcode", "default")
+        zcode["active_group_id"] = migrated["id"]
+        agents.append(zcode)
+        groups.append(migrated)
+
+        for old in old_groups:
+            if old.get("id") == "default":
+                continue
+            agent = cls._new_agent(old.get("name") or "自定义", "custom", api_key=old.get("api_key"))
+            migrated = {key: value for key, value in old.items() if key != "api_key"}
+            migrated.update(agent_id=agent["id"], enabled=True, position=0)
+            agent["active_group_id"] = migrated["id"]
+            agents.append(agent)
+            groups.append(migrated)
+
+        for agent_id, name, kind in (
+            ("grok-build", "GROK BUILD", "grok_build"),
+            ("hermes", "HERMES", "hermes"),
+        ):
+            agent = cls._new_agent(name, kind, agent_id)
+            group = cls._new_group("默认组", agent_id)
+            agent["active_group_id"] = group["id"]
+            agents.append(agent)
+            groups.append(group)
+        return {"version": 3, "agents": agents, "groups": groups, "accounts": accounts}
 
     def _read(self) -> dict:
         return json.loads(self.path.read_text(encoding="utf-8"))
@@ -259,42 +332,89 @@ class AccountStore:
         with self.lock:
             return self._read()
 
-    def public_snapshot(self, group_id: str = "default") -> dict:
+    def public_snapshot(self, agent_id: str = "zcode", group_id: str | None = None) -> dict:
         data = self.snapshot()
-        group = self._find_group(data, group_id)
+        agent = self._find_agent(data, agent_id)
+        if not agent:
+            raise KeyError(agent_id)
+        agent_groups = sorted(
+            (group for group in data["groups"] if group.get("agent_id") == agent_id),
+            key=lambda group: group.get("position", 0),
+        )
+        selected_id = group_id or agent.get("active_group_id")
+        group = next((item for item in agent_groups if item["id"] == selected_id), None)
+        if not group and not group_id and agent_groups:
+            group = agent_groups[0]
+            selected_id = group["id"]
         if not group:
-            raise KeyError(group_id)
+            raise KeyError(group_id or agent_id)
+        public_groups = [self._public_group(item, data["accounts"], len(agent_groups)) for item in agent_groups]
+        agent_names = {item["id"]: item["name"] for item in data["agents"]}
         return {
             "active_id": group.get("active_id"),
-            "selected_group_id": group_id,
-            "groups": [self._public_group(item, data["accounts"]) for item in data["groups"]],
+            "selected_agent_id": agent_id,
+            "selected_group_id": selected_id,
+            "agents": [self._public_agent(item, data["groups"], data["accounts"]) for item in data["agents"]],
+            "groups": public_groups,
+            "move_targets": [
+                {
+                    **self._public_group(item, data["accounts"], 0),
+                    "agent_name": agent_names.get(item.get("agent_id"), "未知 Agent"),
+                }
+                for item in data["groups"]
+            ],
             "accounts": [
-                self._public(account) for account in data["accounts"] if account.get("group_id") == group_id
+                self._public(account) for account in data["accounts"] if account.get("group_id") == selected_id
             ],
         }
+
+    @staticmethod
+    def _find_agent(data: dict, agent_id: str) -> dict | None:
+        return next((agent for agent in data.get("agents", []) if agent.get("id") == agent_id), None)
 
     @staticmethod
     def _find_group(data: dict, group_id: str) -> dict | None:
         return next((group for group in data.get("groups", []) if group.get("id") == group_id), None)
 
     @staticmethod
-    def _public_group(group: dict, accounts: list[dict]) -> dict:
+    def _public_group(group: dict, accounts: list[dict], sibling_count: int = 0) -> dict:
         members = [account for account in accounts if account.get("group_id") == group["id"]]
         return {
             "id": group["id"],
             "name": group["name"],
+            "agent_id": group.get("agent_id"),
+            "enabled": group.get("enabled", True),
+            "position": group.get("position", 0),
             "active_id": group.get("active_id"),
             "created_at": group.get("created_at"),
             "account_count": len(members),
             "ready_count": sum(
                 1 for account in members if account.get("state") == "ready" and account.get("enabled", True)
             ),
-            "is_default": group["id"] == "default",
+            "is_last": sibling_count == 1,
         }
 
-    def groups(self) -> list[dict]:
+    @staticmethod
+    def _public_agent(agent: dict, groups: list[dict], accounts: list[dict]) -> dict:
+        child_ids = {group["id"] for group in groups if group.get("agent_id") == agent["id"]}
+        members = [account for account in accounts if account.get("group_id") in child_ids]
+        return {
+            "id": agent["id"],
+            "name": agent["name"],
+            "kind": agent.get("kind", "custom"),
+            "active_group_id": agent.get("active_group_id"),
+            "created_at": agent.get("created_at"),
+            "group_count": len(child_ids),
+            "account_count": len(members),
+            "ready_count": sum(
+                1 for account in members if account.get("state") == "ready" and account.get("enabled", True)
+            ),
+            "is_preset": agent["id"] in {"zcode", "grok-build", "hermes"},
+        }
+
+    def agents(self) -> list[dict]:
         data = self.snapshot()
-        return [self._public_group(group, data["accounts"]) for group in data["groups"]]
+        return [self._public_agent(agent, data["groups"], data["accounts"]) for agent in data["agents"]]
 
     def group_config(self, group_id: str) -> dict:
         data = self.snapshot()
@@ -303,25 +423,84 @@ class AccountStore:
             raise KeyError(group_id)
         return group.copy()
 
-    def group_for_key(self, api_key: str) -> dict | None:
+    def agent_config(self, agent_id: str) -> dict:
         data = self.snapshot()
-        for group in data["groups"]:
-            if secrets.compare_digest(api_key, group["api_key"]):
-                return group.copy()
+        agent = self._find_agent(data, agent_id)
+        if not agent:
+            raise KeyError(agent_id)
+        return agent.copy()
+
+    def agent_for_key(self, api_key: str) -> dict | None:
+        data = self.snapshot()
+        for agent in data["agents"]:
+            if secrets.compare_digest(api_key, agent["api_key"]):
+                return agent.copy()
         return None
 
-    def create_group(self, name: str) -> dict:
+    def create_agent(self, name: str) -> dict:
+        name = name.strip()
+        if not name or len(name) > 40:
+            raise ValueError("Agent 名称必须为 1-40 个字符")
+        with self.lock:
+            data = self._read()
+            if any(agent["name"].casefold() == name.casefold() for agent in data["agents"]):
+                raise ValueError("Agent 名称已存在")
+            agent = self._new_agent(name, "custom")
+            group = self._new_group("默认组", agent["id"])
+            agent["active_group_id"] = group["id"]
+            data["agents"].append(agent)
+            data["groups"].append(group)
+            self._write(data)
+            result = self._public_agent(agent, data["groups"], data["accounts"])
+            result["group_id"] = group["id"]
+            return result
+
+    def rename_agent(self, agent_id: str, name: str) -> dict:
+        name = name.strip()
+        if not name or len(name) > 40:
+            raise ValueError("Agent 名称必须为 1-40 个字符")
+        with self.lock:
+            data = self._read()
+            agent = self._find_agent(data, agent_id)
+            if not agent:
+                raise KeyError(agent_id)
+            if agent_id in {"zcode", "grok-build", "hermes"}:
+                raise ValueError("预置 Agent 不能重命名")
+            if any(item["id"] != agent_id and item["name"].casefold() == name.casefold() for item in data["agents"]):
+                raise ValueError("Agent 名称已存在")
+            agent["name"] = name
+            self._write(data)
+            return self._public_agent(agent, data["groups"], data["accounts"])
+
+    def delete_agent(self, agent_id: str) -> None:
+        if agent_id in {"zcode", "grok-build", "hermes"}:
+            raise ValueError("预置 Agent 不能删除")
+        with self.lock:
+            data = self._read()
+            if not self._find_agent(data, agent_id):
+                raise KeyError(agent_id)
+            group_ids = {group["id"] for group in data["groups"] if group.get("agent_id") == agent_id}
+            if any(account.get("group_id") in group_ids for account in data["accounts"]):
+                raise ValueError("请先移走该 Agent 下的账号")
+            data["agents"] = [agent for agent in data["agents"] if agent["id"] != agent_id]
+            data["groups"] = [group for group in data["groups"] if group.get("agent_id") != agent_id]
+            self._write(data)
+
+    def create_group(self, name: str, agent_id: str = "zcode") -> dict:
         name = name.strip()
         if not name or len(name) > 40:
             raise ValueError("分组名称必须为 1-40 个字符")
         with self.lock:
             data = self._read()
-            if any(group["name"].casefold() == name.casefold() for group in data["groups"]):
+            if not self._find_agent(data, agent_id):
+                raise ValueError("Agent 不存在")
+            siblings = [group for group in data["groups"] if group.get("agent_id") == agent_id]
+            if any(group["name"].casefold() == name.casefold() for group in siblings):
                 raise ValueError("分组名称已存在")
-            group = self._new_group(name)
+            group = self._new_group(name, agent_id, position=len(siblings))
             data["groups"].append(group)
             self._write(data)
-            return self._public_group(group, data["accounts"])
+            return self._public_group(group, data["accounts"], len(siblings) + 1)
 
     def rename_group(self, group_id: str, name: str) -> dict:
         name = name.strip()
@@ -332,22 +511,74 @@ class AccountStore:
             group = self._find_group(data, group_id)
             if not group:
                 raise KeyError(group_id)
-            if any(item["id"] != group_id and item["name"].casefold() == name.casefold() for item in data["groups"]):
+            if any(
+                item["id"] != group_id
+                and item.get("agent_id") == group.get("agent_id")
+                and item["name"].casefold() == name.casefold()
+                for item in data["groups"]
+            ):
                 raise ValueError("分组名称已存在")
             group["name"] = name
             self._write(data)
-            return self._public_group(group, data["accounts"])
+            siblings = [item for item in data["groups"] if item.get("agent_id") == group.get("agent_id")]
+            return self._public_group(group, data["accounts"], len(siblings))
 
-    def delete_group(self, group_id: str) -> None:
-        if group_id == "default":
-            raise ValueError("默认组不能删除")
+    def toggle_group(self, group_id: str) -> dict:
         with self.lock:
             data = self._read()
-            if not self._find_group(data, group_id):
+            group = self._find_group(data, group_id)
+            if not group:
+                raise KeyError(group_id)
+            group["enabled"] = not group.get("enabled", True)
+            self._write(data)
+            siblings = [item for item in data["groups"] if item.get("agent_id") == group.get("agent_id")]
+            return self._public_group(group, data["accounts"], len(siblings))
+
+    def reorder_group(self, group_id: str, direction: str) -> dict:
+        if direction not in {"up", "down"}:
+            raise ValueError("排序方向无效")
+        with self.lock:
+            data = self._read()
+            group = self._find_group(data, group_id)
+            if not group:
+                raise KeyError(group_id)
+            siblings = sorted(
+                (item for item in data["groups"] if item.get("agent_id") == group.get("agent_id")),
+                key=lambda item: item.get("position", 0),
+            )
+            index = next(i for i, item in enumerate(siblings) if item["id"] == group_id)
+            target_index = index - 1 if direction == "up" else index + 1
+            if 0 <= target_index < len(siblings):
+                other = siblings[target_index]
+                group["position"], other["position"] = other.get("position", 0), group.get("position", 0)
+                self._write(data)
+            return self._public_group(group, data["accounts"], len(siblings))
+
+    def delete_group(self, group_id: str) -> None:
+        with self.lock:
+            data = self._read()
+            group = self._find_group(data, group_id)
+            if not group:
                 raise KeyError(group_id)
             if any(account.get("group_id") == group_id for account in data["accounts"]):
                 raise ValueError("请先移走该组内的账号")
+            siblings = [item for item in data["groups"] if item.get("agent_id") == group.get("agent_id")]
+            if len(siblings) == 1:
+                raise ValueError("每个 Agent 至少保留一个账号组")
             data["groups"] = [group for group in data["groups"] if group["id"] != group_id]
+            for position, item in enumerate(
+                sorted(
+                    (item for item in data["groups"] if item.get("agent_id") == group.get("agent_id")),
+                    key=lambda item: item.get("position", 0),
+                )
+            ):
+                item["position"] = position
+            agent = self._find_agent(data, group.get("agent_id"))
+            if agent and agent.get("active_group_id") == group_id:
+                replacement = next(
+                    (item for item in data["groups"] if item.get("agent_id") == group.get("agent_id")), None
+                )
+                agent["active_group_id"] = replacement["id"] if replacement else None
             self._write(data)
 
     @staticmethod
@@ -454,6 +685,9 @@ class AccountStore:
             if not group:
                 raise KeyError(target_group_id)
             group["active_id"] = account_id
+            agent = self._find_agent(data, group.get("agent_id"))
+            if agent:
+                agent["active_group_id"] = group["id"]
             self._write(data)
             return self._public(account)
 
@@ -470,6 +704,9 @@ class AccountStore:
             if not group:
                 raise KeyError(target_group_id)
             group["active_id"] = account_id
+            agent = self._find_agent(data, group.get("agent_id"))
+            if agent:
+                agent["active_group_id"] = group["id"]
             account.update(last_used_at=utc_now(), last_error=None)
             self._write(data)
             return self._public(account)
@@ -566,8 +803,21 @@ class AccountStore:
             )
             return ready
 
+    def routing_groups(self, agent_id: str) -> list[dict]:
+        data = self.snapshot()
+        if not self._find_agent(data, agent_id):
+            raise KeyError(agent_id)
+        return sorted(
+            (
+                group.copy()
+                for group in data["groups"]
+                if group.get("agent_id") == agent_id and group.get("enabled", True)
+            ),
+            key=lambda group: group.get("position", 0),
+        )
+
     def api_key(self) -> str:
-        return self.group_config("default")["api_key"]
+        return self.agent_config("zcode")["api_key"]
 
 
 def read_auth_identity(home: Path) -> tuple[str | None, str | None]:
@@ -815,9 +1065,9 @@ class RouterServer(ThreadingHTTPServer):
         self.route_locks: dict[str, threading.Lock] = {}
         self.account_locks: dict[str, threading.Lock] = {}
 
-    def route_lock(self, group_id: str) -> threading.Lock:
+    def route_lock(self, agent_id: str) -> threading.Lock:
         with self.lock_registry_guard:
-            return self.route_locks.setdefault(group_id, threading.Lock())
+            return self.route_locks.setdefault(agent_id, threading.Lock())
 
     def account_lock(self, account_id: str) -> threading.Lock:
         # ponytail: stale lock entries are tiny; prune only if account churn becomes measurable.
@@ -884,7 +1134,7 @@ class Handler(SimpleHTTPRequestHandler):
             return False
         return True
 
-    def _provider_group(self) -> str | None:
+    def _provider_agent(self) -> str | None:
         if not self._valid_host():
             self._error(421, "Host 不允许")
             return None
@@ -892,11 +1142,11 @@ class Handler(SimpleHTTPRequestHandler):
         if not authorization.startswith("Bearer "):
             self._error(401, "本地 Provider API Key 无效", "authentication_error")
             return None
-        group = self.app.store.group_for_key(authorization[7:])
-        if not group:
+        agent = self.app.store.agent_for_key(authorization[7:])
+        if not agent:
             self._error(401, "本地 Provider API Key 无效", "authentication_error")
             return None
-        return group["id"]
+        return agent["id"]
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -904,25 +1154,27 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, {"status": "ok"})
         if path == "/api/accounts":
             if self._management_guard():
-                group_id = parse_qs(urlsplit(self.path).query).get("group_id", ["default"])[0]
+                query = parse_qs(urlsplit(self.path).query)
+                agent_id = query.get("agent_id", ["zcode"])[0]
+                group_id = query.get("group_id", [None])[0]
                 try:
-                    return self._json(200, self.app.store.public_snapshot(group_id))
+                    return self._json(200, self.app.store.public_snapshot(agent_id, group_id))
                 except KeyError:
-                    return self._error(404, "分组不存在")
+                    return self._error(404, "Agent 或分组不存在")
             return
-        if path == "/api/groups":
+        if path == "/api/agents":
             if self._management_guard():
-                return self._json(200, {"groups": self.app.store.groups()})
+                return self._json(200, {"agents": self.app.store.agents()})
             return
         if path == "/api/config":
             if self._management_guard():
-                group_id = parse_qs(urlsplit(self.path).query).get("group_id", ["default"])[0]
+                agent_id = parse_qs(urlsplit(self.path).query).get("agent_id", ["zcode"])[0]
                 try:
-                    group = self.app.store.group_config(group_id)
+                    agent = self.app.store.agent_config(agent_id)
                 except KeyError:
-                    return self._error(404, "分组不存在")
+                    return self._error(404, "Agent 不存在")
                 provider_url = f"http://127.0.0.1:{self.server.server_port}/v1"
-                api_key = group["api_key"]
+                api_key = agent["api_key"]
                 return self._json(
                     200,
                     {
@@ -931,16 +1183,20 @@ class Handler(SimpleHTTPRequestHandler):
                         "upstream": self.app.upstream,
                         "system_proxy": system_proxy_settings()[1],
                         "integrations": integration_configs(
-                            provider_url, api_key, group["id"], group["name"]
+                            provider_url, api_key, agent["id"], agent["name"]
                         ),
-                        "group": {"id": group["id"], "name": group["name"]},
+                        "agent": {
+                            "id": agent["id"],
+                            "name": agent["name"],
+                            "kind": agent.get("kind", "custom"),
+                        },
                     },
                 )
             return
         if path.startswith("/v1/"):
-            group_id = self._provider_group()
-            if group_id:
-                return self._proxy(b"", group_id)
+            agent_id = self._provider_agent()
+            if agent_id:
+                return self._proxy(b"", agent_id)
             return
         if path == "/":
             self.path = "/index.html"
@@ -949,19 +1205,26 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         if path.startswith("/v1/"):
-            group_id = self._provider_group()
-            if not group_id:
+            agent_id = self._provider_agent()
+            if not agent_id:
                 return
             try:
-                return self._proxy(self._read_body(), group_id)
+                return self._proxy(self._read_body(), agent_id)
             except ValueError as exc:
                 return self._error(413, str(exc))
         if not self._management_guard():
             return
         try:
             body = self._read_json()
+            if path == "/api/agents":
+                return self._json(201, self.app.store.create_agent(str(body.get("name", ""))))
             if path == "/api/groups":
-                return self._json(201, self.app.store.create_group(str(body.get("name", ""))))
+                return self._json(
+                    201,
+                    self.app.store.create_group(
+                        str(body.get("name", "")), str(body.get("agent_id", "zcode"))
+                    ),
+                )
             if path == "/api/accounts":
                 account = self.app.store.create(
                     str(body.get("name", "")),
@@ -974,11 +1237,25 @@ class Handler(SimpleHTTPRequestHandler):
                 r"/api/accounts/([0-9a-f]{32})/(authorize|select|reset|toggle|usage|membership|move)",
                 path,
             )
-            group_match = re.fullmatch(r"/api/groups/([0-9a-f]{32}|default)/rename", path)
-            if group_match:
+            agent_match = re.fullmatch(r"/api/agents/([0-9a-z-]{1,64})/rename", path)
+            if agent_match:
                 return self._json(
                     200,
-                    self.app.store.rename_group(group_match.group(1), str(body.get("name", ""))),
+                    self.app.store.rename_agent(agent_match.group(1), str(body.get("name", ""))),
+                )
+            group_match = re.fullmatch(
+                r"/api/groups/([0-9a-z-]{1,64})/(rename|toggle|reorder)", path
+            )
+            if group_match:
+                group_id, group_action = group_match.groups()
+                if group_action == "rename":
+                    return self._json(
+                        200, self.app.store.rename_group(group_id, str(body.get("name", "")))
+                    )
+                if group_action == "toggle":
+                    return self._json(200, self.app.store.toggle_group(group_id))
+                return self._json(
+                    200, self.app.store.reorder_group(group_id, str(body.get("direction", "")))
                 )
             if not match:
                 return self._error(404, "接口不存在")
@@ -1010,7 +1287,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raise KeyError(account_id)
             return self._json(200, self.app.store.update(account_id, enabled=not account.get("enabled", True)))
         except KeyError:
-            return self._error(404, "账号不存在")
+            return self._error(404, "资源不存在")
         except (ValueError, json.JSONDecodeError) as exc:
             return self._error(400, str(exc))
 
@@ -1022,7 +1299,16 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError as exc:
             return self._error(413, str(exc))
         path = urlsplit(self.path).path
-        group_match = re.fullmatch(r"/api/groups/([0-9a-f]{32}|default)", path)
+        agent_match = re.fullmatch(r"/api/agents/([0-9a-z-]{1,64})", path)
+        if agent_match:
+            try:
+                self.app.store.delete_agent(agent_match.group(1))
+                return self._json(200, {"deleted": True})
+            except KeyError:
+                return self._error(404, "Agent 不存在")
+            except ValueError as exc:
+                return self._error(400, str(exc))
+        group_match = re.fullmatch(r"/api/groups/([0-9a-z-]{1,64})", path)
         if group_match:
             try:
                 self.app.store.delete_group(group_match.group(1))
@@ -1057,48 +1343,52 @@ class Handler(SimpleHTTPRequestHandler):
             path = base_path + path
         return urlunsplit((parsed.scheme, parsed.netloc, path, local.query, ""))
 
-    def _proxy(self, body: bytes, group_id: str) -> None:
-        with self.app.route_lock(group_id):
-            candidates = self.app.store.candidates(group_id)
-            if not candidates:
-                return self._error(503, "该分组没有可用账号", "group_accounts_unavailable")
+    def _proxy(self, body: bytes, agent_id: str) -> None:
+        with self.app.route_lock(agent_id):
+            groups = self.app.store.routing_groups(agent_id)
+            had_candidates = False
             last_message = "所有账号均不可用"
-            for account in candidates:
-                with self.app.account_lock(account["id"]):
-                    try:
-                        status, reason, headers, payload, connection, response = self._attempt(
-                            account, body, refresh=True
+            for group in groups:
+                candidates = self.app.store.candidates(group["id"])
+                had_candidates = had_candidates or bool(candidates)
+                for account in candidates:
+                    with self.app.account_lock(account["id"]):
+                        try:
+                            status, reason, headers, payload, connection, response = self._attempt(
+                                account, body, refresh=True
+                            )
+                        except RuntimeError as exc:
+                            return self._error(502, str(exc), "upstream_error")
+                        if status == 401:
+                            self.app.store.update(account["id"], state="error", last_error="官方认证已失效")
+                            last_message = "账号认证已失效"
+                            if connection:
+                                connection.close()
+                            continue
+                        error_body = payload.decode("utf-8", errors="replace").lower()
+                        quota_denied = status in {402, 429} or (
+                            status == 403 and any(marker in error_body for marker in QUOTA_MARKERS)
                         )
-                    except RuntimeError as exc:
-                        return self._error(502, str(exc), "upstream_error")
-                    if status == 401:
-                        self.app.store.update(account["id"], state="error", last_error="官方认证已失效")
-                        last_message = "账号认证已失效"
-                        if connection:
-                            connection.close()
-                        continue
-                    error_body = payload.decode("utf-8", errors="replace").lower()
-                    quota_denied = status in {402, 429} or (
-                        status == 403 and any(marker in error_body for marker in QUOTA_MARKERS)
-                    )
-                    if quota_denied:
-                        exhausted = status == 402 or any(marker in error_body for marker in QUOTA_MARKERS)
-                        self.app.store.update(
-                            account["id"],
-                            state="exhausted" if exhausted else "cooldown",
-                            retry_after=None if exhausted else time.time() + 60,
-                            last_error="额度已耗尽" if exhausted else "触发速率限制，60 秒后恢复",
-                        )
-                        last_message = "账号额度已耗尽" if exhausted else "账号暂时限流"
-                        if connection:
-                            connection.close()
-                        continue
-                    if status == 403:
+                        if quota_denied:
+                            exhausted = status == 402 or any(marker in error_body for marker in QUOTA_MARKERS)
+                            self.app.store.update(
+                                account["id"],
+                                state="exhausted" if exhausted else "cooldown",
+                                retry_after=None if exhausted else time.time() + 60,
+                                last_error="额度已耗尽" if exhausted else "触发速率限制，60 秒后恢复",
+                            )
+                            last_message = "账号额度已耗尽" if exhausted else "账号暂时限流"
+                            if connection:
+                                connection.close()
+                            continue
+                        if status == 403:
+                            return self._send_upstream(status, reason, headers, payload, response)
+                        if status >= 500:
+                            return self._send_upstream(status, reason, headers, payload, response)
+                        self.app.store.mark_used(account["id"], group["id"])
                         return self._send_upstream(status, reason, headers, payload, response)
-                    if status >= 500:
-                        return self._send_upstream(status, reason, headers, payload, response)
-                    self.app.store.mark_used(account["id"], group_id)
-                    return self._send_upstream(status, reason, headers, payload, response)
+            if not had_candidates:
+                return self._error(503, "该 Agent 没有启用且可用的账号组", "agent_accounts_unavailable")
             return self._error(429, last_message, "accounts_exhausted")
 
     def _attempt(self, account: dict, body: bytes, refresh: bool):

@@ -7,7 +7,7 @@
 - [x] Run automated and live acceptance checks.
 - [x] Add client-native reasoning presets for Zcode Desktop, Hermes and Grok Build without rewriting Provider traffic.
 - [x] Repair account deletion keep-alive handling and replace native confirmation with an in-app dialog.
-- [x] Add non-inference credit usage monitoring with 10-minute polling and manual refresh.
+- [x] Add non-inference credit usage monitoring with 30–35 minute polling and manual refresh.
 - [x] Keep the active marker synchronized with the account that handled the latest successful Provider request.
 - [x] Align the top-left brand with the account workspace shell.
-- [x] Add exclusive account groups with per-group Provider keys and isolated routing.
+- [x] Add Agent pages with per-Agent Provider keys, ordered group fallback and group isolation controls.

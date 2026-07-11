@@ -10,5 +10,6 @@
 - One dark theme, one green accent, 12px controls and 16px surfaces.
 - The 1280×720 shell never scrolls; account overflow uses pagination and secondary connection details use a drawer.
 - No external fonts, images, analytics or CDNs.
-- Client identity is selected only by a per-group API Key; never infer it from User-Agent or request bodies.
-- Accounts have exactly one group. Empty or exhausted groups never fall back across group boundaries.
+- Client identity is selected only by a per-Agent API Key; never infer it from User-Agent or request bodies.
+- Accounts have exactly one group. Enabled groups fall back in explicit order inside one Agent; isolated groups retain data but receive no traffic.
+- Same-Agent requests serialize; different Agents may run in parallel; streaming retains the account lock until completion.

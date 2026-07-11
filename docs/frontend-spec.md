@@ -7,14 +7,14 @@
 - Show official URL and one-time code while pending.
 - Select active account, enable/disable, reset exhausted/error state and delete.
 - Show at most four accounts per page so the fixed-height window never needs an internal list scrollbar.
-- Filter the account list by the selected group and support moving an account to one other group.
+- Filter the account list by the selected Agent and group, and support moving an account to any group.
 
-## Account groups
+## Agents and account groups
 
-- Keep one undeletable default group and allow create, rename and empty-group deletion.
-- Give every group one independent local API Key and active-account pointer while retaining the same Base URL.
-- Migrate v1 state atomically: preserve the old API Key and active account in the default group and assign every existing account to it.
-- Keep account membership exclusive. Requests never fall back to another group.
+- Provide ZCODE, GROK BUILD and HERMES Agent pages. Each Agent owns one local API Key, one route lock and one ordered list of account groups.
+- Allow group create, rename, isolation toggle, up/down reordering and empty-group deletion while retaining at least one group per Agent.
+- Keep account membership exclusive. Within an Agent, try enabled groups in order and advance only after quota/auth exhaustion; disabled groups retain data but never receive traffic.
+- Migrate old state atomically into ZCODE, preserving the old API Key, active account, account membership and existing client compatibility.
 
 ## Window layout
 
@@ -28,8 +28,8 @@
 - Bind to `127.0.0.1` only.
 - Proxy `/v1/models`, `/v1/responses` and `/v1/chat/completions` without rewriting request bodies.
 - Preserve normal JSON and SSE streaming responses.
-- Atomically move the selected group's active-account pointer to the account that actually accepted the latest Provider request.
-- Serialize requests inside a group, allow different groups to run in parallel and keep an account lock across streaming.
+- Atomically move both the group and Agent active pointers to the account that actually accepted the latest Provider request.
+- Serialize requests inside an Agent, allow different Agents to run in parallel and keep an account lock across streaming.
 - Refresh through the official CLI after a 401, then retry once.
 - Rotate on 402/429 or an explicit quota marker such as xAI's 403 `spending-limit`; do not rotate on arbitrary 4xx validation errors.
 - Return an OpenAI-shaped error when no healthy account remains.

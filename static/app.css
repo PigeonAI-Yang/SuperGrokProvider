@@ -127,6 +127,28 @@ h1 {
   line-height: 1.4;
 }
 .intro > div > p { margin: 0; color: var(--muted); font-size: 14px; }
+.agent-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.agent-tabs button {
+  min-height: 36px;
+  padding: 0 14px;
+  color: var(--muted);
+  background: var(--surface);
+  border-color: var(--line);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.agent-tabs button:hover { color: var(--text); border-color: var(--line-strong); }
+.agent-tabs button[aria-current="page"] {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
 
 .workspace {
   display: grid;
@@ -281,6 +303,9 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .inline-form button { margin: 0; padding: 0 13px; font-size: 12px; }
 .group-stats { display: flex; gap: 24px; margin: 16px 0; color: var(--muted); font-size: 12px; }
 .group-stats strong { margin-left: 5px; color: var(--text); }
+.group-controls { display: grid; grid-template-columns: 1.5fr 0.75fr 0.75fr; gap: 8px; margin-bottom: 12px; }
+.group-controls button { min-height: 38px; padding: 0 9px; font-size: 11px; }
+.group-controls button.isolated { color: var(--warning); border-color: rgb(232 199 121 / 0.35); }
 .group-hint { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .integration-entry { margin-top: 8px; }
 .integration-drawer { width: 600px; padding: 24px 26px; overflow: hidden; }

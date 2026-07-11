@@ -21,15 +21,16 @@
     <section class="intro" aria-labelledby="page-title">
       <div>
         <h1 id="page-title">账号与 Provider</h1>
-        <p>官方授权，自动轮换，所有 Agent 共用一个本地入口。</p>
+        <p>每个 Agent 独立入口，账号组按顺序自动兜底。</p>
       </div>
+      <nav id="agent-tabs" class="agent-tabs" aria-label="Agent 分页"></nav>
     </section>
 
     <div class="workspace">
       <section class="accounts-panel" aria-labelledby="accounts-title">
         <div class="section-heading">
           <div>
-            <h2 id="accounts-title">账号池</h2>
+            <h2 id="accounts-title">账号组</h2>
             <p id="account-summary">正在读取账号状态</p>
           </div>
           <div class="heading-actions">
@@ -147,7 +148,7 @@
     <div class="drawer-heading">
       <div>
         <p class="kicker">Account groups</p>
-        <h2 id="groups-title">管理分组</h2>
+        <h2 id="groups-title">管理账号组</h2>
       </div>
       <button type="button" id="close-groups">关闭</button>
     </div>
@@ -161,6 +162,11 @@
         <span>账号 <strong id="group-account-count">0</strong></span>
         <span>可用 <strong id="group-ready-count">0</strong></span>
       </div>
+      <div class="group-controls">
+        <button class="secondary" id="toggle-group" type="button">启用状态</button>
+        <button class="secondary" id="move-group-up" type="button">上移</button>
+        <button class="secondary" id="move-group-down" type="button">下移</button>
+      </div>
       <button class="danger wide" id="delete-group" type="button">删除当前分组</button>
     </section>
     <section class="group-section" aria-labelledby="create-group-title">
@@ -169,7 +175,7 @@
         <input id="new-group-name" maxlength="40" placeholder="例如：Zcode" required aria-label="新分组名称">
         <button class="primary" type="submit">新建</button>
       </form>
-      <p class="group-hint">每个分组拥有独立 API Key；请求不会跨组使用账号。</p>
+      <p class="group-hint">启用的账号组按顺序自动兜底；隔离后保留账号，但不参与路由。</p>
     </section>
   </aside>
 
@@ -182,7 +188,7 @@
       <button type="button" id="close-details">关闭</button>
     </div>
     <dl class="detail-list">
-      <div><dt>轮换策略</dt><dd>仅在当前分组内调度，额度耗尽后切换</dd></div>
+      <div><dt>轮换策略</dt><dd>当前 Agent 内按账号组顺序自动兜底</dd></div>
       <div><dt>官方上游</dt><dd id="upstream-value">正在加载</dd></div>
       <div><dt>系统代理</dt><dd id="drawer-proxy">正在加载</dd></div>
       <div><dt>账号隔离</dt><dd>每个账号使用独立 GROK_HOME</dd></div>

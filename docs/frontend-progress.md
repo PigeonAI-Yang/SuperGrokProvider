@@ -18,7 +18,7 @@ Delivered
 - A secondary client-config drawer now generates copyable, client-native reasoning presets for Zcode Desktop, Hermes and Grok Build while preserving transparent upstream request bodies.
 - Independent launcher and backend singleton locks prevent duplicate windows, tray hosts and listeners.
 - The top-left brand and account workspace now share the same 1180px shell gutter.
-- Exclusive account groups now have independent Provider keys, active-account pointers and route locks; the UI supports create, rename, empty-group deletion and account moves.
+- ZCODE, GROK BUILD and HERMES now have independent Provider keys and Agent-level route locks. Each Agent supports ordered account-group fallback, isolation toggles, reordering, create/rename/delete and cross-Agent account moves.
 
 ## Current Loop
 
@@ -30,7 +30,7 @@ Delivered
 
 ## Risks
 
-- One account cannot belong to multiple groups by design; use one shared group when clients should share a pool.
+- One account cannot belong to multiple groups by design; move it to the Agent that should own its traffic.
 
 ## Blockers
 

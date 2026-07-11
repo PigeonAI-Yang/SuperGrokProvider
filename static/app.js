@@ -1,7 +1,8 @@
 const $ = (selector) => document.querySelector(selector);
 const PAGE_SIZE = 4;
 const state = {
-  accounts: [], groups: [], groupId: "default", activeId: null, config: null,
+  accounts: [], agents: [], agentId: "zcode", groups: [], groupId: null, moveTargets: [],
+  activeId: null, config: null,
   authId: null, deleteTarget: null, moveId: null, poll: null, page: 0,
   integration: "zcode", drawerTrigger: "#open-details",
 };
@@ -21,6 +22,24 @@ function currentGroup() {
   return state.groups.find((group) => group.id === state.groupId) || null;
 }
 
+function currentAgent() {
+  return state.agents.find((agent) => agent.id === state.agentId) || null;
+}
+
+function renderAgentTabs() {
+  const tabs = $("#agent-tabs");
+  tabs.replaceChildren();
+  for (const agent of state.agents) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = agent.name;
+    button.dataset.agentId = agent.id;
+    button.setAttribute("aria-current", agent.id === state.agentId ? "page" : "false");
+    button.title = `${agent.group_count} 个组 · ${agent.account_count} 个账号`;
+    tabs.append(button);
+  }
+}
+
 function fillGroupSelect(select, selectedId = state.groupId, excludedId = null) {
   const groups = state.groups.filter((group) => group.id !== excludedId);
   const signature = JSON.stringify(groups.map((group) => [group.id, group.name]));
@@ -37,21 +56,42 @@ function fillGroupSelect(select, selectedId = state.groupId, excludedId = null) 
   if (selectedId && groups.some((group) => group.id === selectedId)) select.value = selectedId;
 }
 
+function fillMoveTargets(excludedId) {
+  const select = $("#move-group");
+  const targets = state.moveTargets.filter((group) => group.id !== excludedId);
+  select.replaceChildren();
+  for (const group of targets) {
+    const option = document.createElement("option");
+    option.value = group.id;
+    option.textContent = `${group.agent_name} / ${group.name}`;
+    select.append(option);
+  }
+}
+
 function renderGroupControls() {
   const group = currentGroup();
-  if (!group) return;
+  const agent = currentAgent();
+  if (!group || !agent) return;
+  renderAgentTabs();
   fillGroupSelect($("#group-select"));
   const accountGroup = $("#account-group");
   const pendingGroup = $("#account-dialog").open ? accountGroup.value : state.groupId;
   fillGroupSelect(accountGroup, pendingGroup || state.groupId);
-  $("#provider-group-name").textContent = `${group.name} · 连接信息`;
+  $("#provider-group-name").textContent = `${agent.name} · 连接信息`;
+  $("#groups-title").textContent = `${agent.name} · 管理账号组`;
   if (document.activeElement !== $("#rename-group-name")) $("#rename-group-name").value = group.name;
   $("#group-account-count").textContent = group.account_count;
   $("#group-ready-count").textContent = group.ready_count;
   const deleteButton = $("#delete-group");
-  deleteButton.hidden = group.is_default;
+  deleteButton.hidden = group.is_last;
   deleteButton.disabled = group.account_count > 0;
-  deleteButton.textContent = group.account_count > 0 ? `先移走 ${group.account_count} 个账号` : "删除当前分组";
+  deleteButton.textContent = group.account_count > 0 ? `先移走 ${group.account_count} 个账号` : "删除当前账号组";
+  const toggle = $("#toggle-group");
+  toggle.textContent = group.enabled ? "已启用 · 点击隔离" : "已隔离 · 点击启用";
+  toggle.classList.toggle("isolated", !group.enabled);
+  const index = state.groups.findIndex((item) => item.id === group.id);
+  $("#move-group-up").disabled = index <= 0;
+  $("#move-group-down").disabled = index < 0 || index >= state.groups.length - 1;
 }
 
 function addedAtLabel(value) {
@@ -164,7 +204,7 @@ function renderAccounts() {
     if (account.state === "ready" && account.id !== state.activeId && account.enabled) actions.append(createButton("设为当前", "select", account.id));
     if (account.state === "ready") actions.append(createButton(account.enabled ? "停用" : "启用", "toggle", account.id));
     if (!["pending", "authorizing"].includes(account.state)) actions.append(createButton("刷新额度", "usage", account.id));
-    if (state.groups.length > 1) actions.append(createButton("移动", "move", account.id));
+    if (state.moveTargets.length > 1) actions.append(createButton("移动", "move", account.id));
     actions.append(createButton("删除", "delete", account.id, "danger"));
     row.append(identity, actions);
     list.append(row);
@@ -222,10 +262,17 @@ function updateAuthDialog() {
 
 async function load() {
   try {
-    const query = `?group_id=${encodeURIComponent(state.groupId)}`;
-    const [accounts, config] = await Promise.all([api(`/api/accounts${query}`), api(`/api/config${query}`)]);
+    const agentQuery = `agent_id=${encodeURIComponent(state.agentId)}`;
+    const groupQuery = state.groupId ? `&group_id=${encodeURIComponent(state.groupId)}` : "";
+    const [accounts, config] = await Promise.all([
+      api(`/api/accounts?${agentQuery}${groupQuery}`),
+      api(`/api/config?${agentQuery}`),
+    ]);
     state.accounts = accounts.accounts;
+    state.agents = accounts.agents;
     state.groups = accounts.groups;
+    state.moveTargets = accounts.move_targets;
+    state.agentId = accounts.selected_agent_id;
     state.groupId = accounts.selected_group_id;
     state.activeId = accounts.active_id;
     state.config = config;
@@ -273,11 +320,11 @@ function openDeleteDialog(id) {
 
 function openGroupDeleteDialog() {
   const group = currentGroup();
-  if (!group || group.is_default || group.account_count) return;
+  if (!group || group.is_last || group.account_count) return;
   state.deleteTarget = { type: "group", id: group.id };
   $("#delete-kicker").textContent = "删除分组";
   $("#delete-target-name").textContent = group.name;
-  $("#delete-description").textContent = "该分组的 API Key 将立即失效，此操作无法撤销。";
+  $("#delete-description").textContent = "该账号组会从当前 Agent 的兜底队列中移除，此操作无法撤销。";
   $("#delete-error").hidden = true;
   $("#delete-error").textContent = "";
   $("#delete-dialog").showModal();
@@ -289,7 +336,7 @@ function openMoveDialog(id) {
   if (!account) return toast("账号已不存在，请刷新后重试", true);
   state.moveId = id;
   $("#move-account-name").textContent = account.name;
-  fillGroupSelect($("#move-group"), null, account.group_id);
+  fillMoveTargets(account.group_id);
   $("#move-error").hidden = true;
   $("#move-error").textContent = "";
   $("#move-dialog").showModal();
@@ -304,6 +351,16 @@ async function mutate(path, method = "POST", body = {}) {
 }
 
 $("#add-account").addEventListener("click", openCreateDialog);
+$("#agent-tabs").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-agent-id]");
+  if (!button || button.dataset.agentId === state.agentId) return;
+  state.agentId = button.dataset.agentId;
+  state.groupId = null;
+  state.page = 0;
+  const agent = state.agents.find((item) => item.id === state.agentId);
+  if (agent && ["zcode", "grok_build", "hermes"].includes(agent.kind)) state.integration = agent.kind;
+  await load();
+});
 $("#group-select").addEventListener("change", async (event) => {
   state.groupId = event.target.value;
   state.page = 0;
@@ -414,7 +471,7 @@ $("#confirm-delete").addEventListener("click", async () => {
   try {
     if (state.deleteTarget.type === "group") {
       await api(`/api/groups/${state.deleteTarget.id}`, { method: "DELETE" });
-      state.groupId = "default";
+      state.groupId = null;
       await load();
       closeDetails();
       toast("分组已删除");
@@ -463,7 +520,7 @@ $("#create-group-form").addEventListener("submit", async (event) => {
   try {
     const group = await api("/api/groups", {
       method: "POST",
-      body: JSON.stringify({ name: $("#new-group-name").value }),
+      body: JSON.stringify({ name: $("#new-group-name").value, agent_id: state.agentId }),
     });
     state.groupId = group.id;
     state.page = 0;
@@ -491,6 +548,24 @@ $("#rename-group-form").addEventListener("submit", async (event) => {
   }
 });
 $("#delete-group").addEventListener("click", openGroupDeleteDialog);
+$("#toggle-group").addEventListener("click", async () => {
+  try {
+    await mutate(`/api/groups/${state.groupId}/toggle`);
+    toast(currentGroup()?.enabled ? "账号组已启用" : "账号组已隔离");
+  } catch (error) {
+    toast(error.message, true);
+  }
+});
+async function reorderGroup(direction) {
+  try {
+    await mutate(`/api/groups/${state.groupId}/reorder`, "POST", { direction });
+    toast("兜底顺序已更新");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+$("#move-group-up").addEventListener("click", () => reorderGroup("up"));
+$("#move-group-down").addEventListener("click", () => reorderGroup("down"));
 
 $("#account-form").addEventListener("submit", async (event) => {
   event.preventDefault();
