@@ -321,7 +321,7 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .group-section { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
 .inline-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .inline-form input, .inline-form button { min-height: 42px; }
-.inline-form button { margin: 0; padding: 0 13px; font-size: 12px; }
+.inline-form button, form.inline-form .primary { margin: 0; padding: 0 13px; font-size: 12px; }
 .group-stats { display: flex; gap: 24px; margin: 16px 0; color: var(--muted); font-size: 12px; }
 .group-stats strong { margin-left: 5px; color: var(--text); }
 .group-controls { display: grid; grid-template-columns: 1.5fr 0.75fr 0.75fr; gap: 8px; margin-bottom: 12px; }
@@ -330,9 +330,10 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .group-hint { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .budget-form { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .budget-form > label:first-child, .budget-form > button { grid-column: 1 / -1; }
+.budget-form > label:first-child { display: inline-flex; align-items: center; justify-content: flex-start; gap: 7px; width: fit-content; }
 .budget-form label { margin: 0; font-size: 11px; }
 .budget-form input[type="number"] { width: 100%; min-height: 36px; margin-top: 5px; }
-.budget-form input[type="checkbox"] { min-height: auto; }
+.budget-form input[type="checkbox"] { flex: 0 0 auto; width: 14px; height: 14px; min-height: 0; margin: 0; padding: 0; }
 .budget-form button { min-height: 38px; margin: 0; }
 .budget-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .budget-actions button { min-height: 36px; font-size: 11px; }
