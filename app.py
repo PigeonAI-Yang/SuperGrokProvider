@@ -1268,8 +1268,14 @@ class UsageMonitor:
                     delay = 1 + secrets.randbelow(3) if attempt == 0 else 3 + secrets.randbelow(4)
                     time.sleep(delay)
             config = payload.get("config", payload)
-            percent = float(config["creditUsagePercent"])
             period = config.get("currentPeriod") or {}
+            raw_percent = config.get("creditUsagePercent")
+            if raw_percent is None:
+                if config.get("productUsage") or not (period.get("start") and period.get("end")):
+                    raise ValueError("官方额度响应缺少 creditUsagePercent")
+                # ponytail: xAI omits zero-valued usage fields at the start of a valid new period.
+                raw_percent = 0
+            percent = float(raw_percent)
             changes = {
                 "usage_percent": percent,
                 "usage_period_start": period.get("start") or config.get("billingPeriodStart"),

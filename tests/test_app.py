@@ -274,6 +274,22 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(opener.call_count, 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 5])
 
+    def test_usage_monitor_treats_valid_empty_new_period_as_zero(self):
+        account = self.store.create("新周期账号")
+        home = self.store.account_home(account["id"])
+        (home / "auth.json").write_text('{"profile":{"key":"token"}}', encoding="utf-8")
+        self.store.update(account["id"], state="exhausted", usage_percent=100.0, usage_error="old")
+        payload = {
+            "config": {
+                "currentPeriod": {"start": "2026-07-12T13:07:06Z", "end": "2026-07-19T13:07:06Z"},
+                "billingPeriodStart": "2026-07-12T13:07:06Z",
+                "billingPeriodEnd": "2026-07-19T13:07:06Z",
+            }
+        }
+        with patch.object(app, "open_with_system_proxy", return_value=FakeResponse(payload)):
+            result = UsageMonitor(self.store, FakeAuth(), "0.2.82").refresh_one(account["id"])
+        self.assertEqual((result["state"], result["usage_percent"], result["usage_error"]), ("ready", 0.0, None))
+
     def test_usage_monitor_does_not_retry_http_4xx(self):
         account = self.store.create("四百错误账号")
         home = self.store.account_home(account["id"])

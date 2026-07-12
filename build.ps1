@@ -7,7 +7,10 @@ if (-not (Test-Path -LiteralPath $python)) {
     py -3.11 -m venv $venv
 }
 
-& $python -m pip install --disable-pip-version-check -r (Join-Path $root 'requirements-desktop.txt')
+& $python -c "import PyInstaller, webview" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    & $python -m pip install --disable-pip-version-check -r (Join-Path $root 'requirements-desktop.txt')
+}
 & $python -m PyInstaller `
     --noconfirm `
     --clean `
@@ -18,5 +21,8 @@ if (-not (Test-Path -LiteralPath $python)) {
     --add-data "$(Join-Path $root 'static');static" `
     --hidden-import webview.platforms.edgechromium `
     (Join-Path $root 'desktop.py')
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed with exit code $LASTEXITCODE"
+}
 
 Write-Host "Built: $(Join-Path $root 'dist\SuperGrokRouter.exe')"
