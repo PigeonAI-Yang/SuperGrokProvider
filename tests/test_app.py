@@ -55,11 +55,14 @@ class IntegrationConfigTests(unittest.TestCase):
 
     def test_zcode_uses_current_reasoning_level_schema(self):
         payload = json.loads(self.configs["zcode"]["content"])
-        model = payload["provider"]["supergrok-router"]["models"]["grok-4.5"]
-        reasoning = model["reasoning"]
+        reasoning = payload["modelCatalog"]["overrides"]["supergrok-router/grok-4.5"]["reasoning"]
         self.assertEqual(payload["provider"]["supergrok-router"]["kind"], "openai-compatible")
-        self.assertEqual(reasoning["variants"], ["low", "medium", "high", "xhigh"])
-        self.assertEqual(reasoning["defaultVariant"], "high")
+        self.assertEqual(reasoning["levels"], ["low", "medium", "high"])
+        self.assertEqual(reasoning["defaultLevel"], "high")
+        self.assertEqual(
+            reasoning["providerOptionsByLevel"]["low"]["openaiCompatible"],
+            {"reasoningEffort": "low"},
+        )
         self.assertEqual(payload["provider"]["supergrok-router"]["options"]["apiKey"], self.key)
 
     def test_hermes_and_grok_build_use_responses_reasoning_contracts(self):
@@ -554,7 +557,7 @@ class ProviderRotationTests(unittest.TestCase):
                 models = result["models"]
         self.assertEqual(opener.call_args.args[0].headers["Authorization"], "Bearer selected-token")
         self.assertEqual(result["source"], "account")
-        self.assertIn("xhigh", models[0]["reasoning"])
+        self.assertEqual(models[0]["reasoning"], "low / medium / high（默认 high）")
         self.assertIn("默认低", models[1]["reasoning"])
         self.assertIn("Agent 数", models[2]["reasoning"])
         self.assertEqual(models[3]["reasoning"], "固定关闭")

@@ -48,7 +48,7 @@ def default_budget_policy() -> dict:
 
 def model_reasoning_capability(model_id: str) -> str:
     if model_id == "grok-4.5":
-        return "low / medium / high / xhigh（默认 high）"
+        return "low / medium / high（默认 high）"
     if model_id == "grok-4.3":
         return "无 / 低 / 中 / 高（默认低）"
     if model_id.startswith("grok-4.20-multi-agent"):
@@ -139,37 +139,49 @@ def integration_configs(
             "context_window = 500000",
         )
     )
-    zcode_content = "\n".join(
-        (
-            "{",
-            '  "provider": {',
-            f'    "{provider_key}": {{',
-            f'      "name": {quoted_name},',
-            '      "kind": "openai-compatible",',
-            '      "source": "custom",',
-            f'      "options": {{"apiKey": {quoted_key}, "baseURL": {quoted_url}, "apiKeyRequired": true}},',
-            '      "models": {',
-            '        "grok-4.5": {',
-            '          "name": "Grok 4.5",',
-            '          "limit": {"context": 500000},',
-            '          "modalities": {"input": ["text"], "output": ["text"]},',
-            '          "reasoning": {',
-            '            "enabled": true,',
-            '            "variants": ["low", "medium", "high", "xhigh"],',
-            '            "defaultVariant": "high"',
-            "          }",
-            "        }",
-            "      }",
-            "    }",
-            "  }",
-            "}",
-        )
+    provider_options_by_level = {
+        level: {"openaiCompatible": {"reasoningEffort": level}}
+        for level in ("low", "medium", "high")
+    }
+    zcode_content = json.dumps(
+        {
+            "provider": {
+                provider_key: {
+                    "name": provider_name,
+                    "kind": "openai-compatible",
+                    "source": "custom",
+                    "options": {"apiKey": api_key, "baseURL": provider_url, "apiKeyRequired": True},
+                    "models": {
+                        "grok-4.5": {
+                            "name": "Grok 4.5",
+                            "limit": {"context": 500000},
+                            "modalities": {"input": ["text"], "output": ["text"]},
+                        }
+                    },
+                }
+            },
+            "modelCatalog": {
+                "overrides": {
+                    f"{provider_key}/grok-4.5": {
+                        "supportsReasoning": True,
+                        "reasoning": {
+                            "enabled": True,
+                            "levels": ["low", "medium", "high"],
+                            "defaultLevel": "high",
+                            "providerOptionsByLevel": provider_options_by_level,
+                        },
+                    }
+                }
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
     )
     return {
         "zcode": {
             "label": "Zcode Desktop",
             "filename": r"%USERPROFILE%\.zcode\v2\config.json",
-            "note": f"将 provider.{provider_key} 合并进现有 JSON；推理按钮使用 Grok Build 实际提供的 low / medium / high / xhigh 档位。",
+            "note": f"同时合并 provider.{provider_key} 与 modelCatalog.overrides；low / medium / high 会映射到上游 reasoning_effort。",
             "content": zcode_content,
         },
         "hermes": {
