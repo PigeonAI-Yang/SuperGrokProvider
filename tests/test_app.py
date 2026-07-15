@@ -182,11 +182,17 @@ class StoreTests(unittest.TestCase):
 
     def test_any_agent_can_reuse_another_agents_account_group(self):
         account = self.store.create("共享账号", "heavy")
+        second = self.store.create("共享备用账号", "super")
         self.store.update(account["id"], state="ready")
+        self.store.update(second["id"], state="ready")
+        self.store.select(account["id"])
         reused = self.store.reuse_group("default", "grok-build")
         snapshot = self.store.public_snapshot("grok-build", reused["id"])
-        self.assertEqual([item["id"] for item in snapshot["accounts"]], [account["id"]])
+        self.assertEqual([item["id"] for item in snapshot["accounts"]], [account["id"], second["id"]])
         self.assertTrue(snapshot["accounts"][0]["shared"])
+        self.store.select(second["id"], reused["id"])
+        self.assertEqual(self.store.group_config(reused["id"])["active_id"], second["id"])
+        self.assertEqual(self.store.group_config("default")["active_id"], account["id"])
         with self.assertRaisesRegex(ValueError, "同一 Agent"):
             self.store.reuse_group("default", "zcode")
 

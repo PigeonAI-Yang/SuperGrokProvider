@@ -1562,7 +1562,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.app.auth.start(account_id)
                 return self._json(202, self.app.store.get(account_id) or {})
             if action == "select":
-                return self._json(200, self.app.store.select(account_id))
+                return self._json(200, self.app.store.select(account_id, str(body.get("group_id") or "") or None))
             if action == "move":
                 with self.app.account_lock(account_id):
                     return self._json(200, self.app.store.move(account_id, str(body.get("group_id", ""))))

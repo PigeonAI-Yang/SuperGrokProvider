@@ -252,7 +252,7 @@ function renderAccounts() {
     actions.className = "account-actions";
     if (!account.shared && ["pending", "error"].includes(account.state)) actions.append(createButton("重新授权", "authorize", account.id));
     if (!account.shared && ["exhausted", "cooldown", "error"].includes(account.state)) actions.append(createButton("重置状态", "reset", account.id));
-    if (!account.shared && account.state === "ready" && account.id !== state.activeId && account.enabled) actions.append(createButton("设为当前", "select", account.id));
+    if (account.state === "ready" && account.id !== state.activeId && account.enabled) actions.append(createButton("设为当前", "select", account.id));
     if (!account.shared && account.state === "ready") actions.append(createButton(account.enabled ? "停用" : "启用", "toggle", account.id));
     if (!["pending", "authorizing"].includes(account.state)) actions.append(createButton("刷新额度", "usage", account.id));
     if (!account.shared && state.moveTargets.length > 1) actions.append(createButton("移动", "move", account.id));
@@ -594,7 +594,7 @@ document.addEventListener("click", async (event) => {
       startPolling();
       return;
     }
-    await mutate(`/api/accounts/${id}/${action}`);
+    await mutate(`/api/accounts/${id}/${action}`, "POST", action === "select" ? { group_id: state.groupId } : {});
     toast("状态已更新");
   } catch (error) {
     toast(error.message, true);
