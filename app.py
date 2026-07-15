@@ -818,6 +818,7 @@ class AccountStore:
             "device_code",
             "auth_output",
             "usage_percent",
+            "usage_inferred",
             "usage_period_start",
             "usage_period_end",
             "usage_checked_at",
@@ -862,6 +863,7 @@ class AccountStore:
                 "device_code": None,
                 "auth_output": "",
                 "usage_percent": None,
+                "usage_inferred": False,
                 "usage_period_start": None,
                 "usage_period_end": None,
                 "usage_checked_at": None,
@@ -1282,6 +1284,7 @@ class UsageMonitor:
             config = payload.get("config", payload)
             period = config.get("currentPeriod") or {}
             raw_percent = config.get("creditUsagePercent")
+            inferred = raw_percent is None
             if raw_percent is None:
                 if config.get("productUsage") or not (period.get("start") and period.get("end")):
                     raise ValueError("官方额度响应缺少 creditUsagePercent")
@@ -1290,6 +1293,7 @@ class UsageMonitor:
             percent = float(raw_percent)
             changes = {
                 "usage_percent": percent,
+                "usage_inferred": inferred,
                 "usage_period_start": period.get("start") or config.get("billingPeriodStart"),
                 "usage_period_end": period.get("end") or config.get("billingPeriodEnd"),
                 "usage_checked_at": utc_now(),

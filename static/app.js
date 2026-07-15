@@ -160,7 +160,7 @@ function usageLabel(account) {
   const reset = account.usage_period_end
     ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(account.usage_period_end))
     : "未知时间";
-  return { text: "", error: false, percent: account.usage_percent, reset };
+  return { text: "", error: false, percent: account.usage_percent, inferred: account.usage_inferred, reset };
 }
 
 function renderAccounts() {
@@ -225,7 +225,8 @@ function renderAccounts() {
       fill.style.width = `${Math.max(0, Math.min(100, usage.percent))}%`;
       meter.append(fill);
       const percent = document.createElement("strong");
-      percent.textContent = `${usage.percent.toFixed(1)}%`;
+      percent.textContent = usage.inferred ? "<1%" : `${usage.percent.toFixed(1)}%`;
+      if (usage.inferred) percent.title = "官方按 0% 展示，实际用量尚未达到 1% 或仍在更新";
       const reset = document.createElement("span");
       reset.textContent = `${usage.reset} 重置`;
       usageNode.append(meter, percent, reset);

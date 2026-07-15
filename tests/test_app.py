@@ -252,6 +252,7 @@ class StoreTests(unittest.TestCase):
             result = monitor.refresh_one(account["id"])
         self.assertEqual(result["state"], "exhausted")
         self.assertEqual(result["usage_percent"], 100.0)
+        self.assertFalse(result["usage_inferred"])
 
         restored = {"config": {"creditUsagePercent": 12.5, "billingPeriodEnd": "2026-07-19T00:00:00Z"}}
         with patch.object(app, "open_with_system_proxy", return_value=FakeResponse(restored)):
@@ -277,7 +278,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(opener.call_count, 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 5])
 
-    def test_usage_monitor_treats_valid_empty_new_period_as_zero(self):
+    def test_usage_monitor_marks_valid_empty_period_as_inferred_zero(self):
         account = self.store.create("新周期账号")
         home = self.store.account_home(account["id"])
         (home / "auth.json").write_text('{"profile":{"key":"token"}}', encoding="utf-8")
@@ -291,7 +292,10 @@ class StoreTests(unittest.TestCase):
         }
         with patch.object(app, "open_with_system_proxy", return_value=FakeResponse(payload)):
             result = UsageMonitor(self.store, FakeAuth(), "0.2.82").refresh_one(account["id"])
-        self.assertEqual((result["state"], result["usage_percent"], result["usage_error"]), ("ready", 0.0, None))
+        self.assertEqual(
+            (result["state"], result["usage_percent"], result["usage_inferred"], result["usage_error"]),
+            ("ready", 0.0, True, None),
+        )
 
     def test_usage_monitor_does_not_retry_http_4xx(self):
         account = self.store.create("四百错误账号")
