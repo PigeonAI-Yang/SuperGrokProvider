@@ -170,10 +170,14 @@
       <button class="danger wide" id="delete-group" type="button">删除当前分组</button>
     </section>
     <section class="group-section" aria-labelledby="create-group-title">
-      <p class="drawer-label" id="create-group-title">新建分组</p>
-      <form id="create-group-form" class="inline-form">
+      <p class="drawer-label" id="create-group-title">添加分组</p>
+      <form id="create-group-form" class="inline-form group-create-form">
+        <select id="group-create-mode" aria-label="添加分组方式">
+          <option value="new">新建</option>
+          <option value="reuse">复用</option>
+        </select>
         <input id="new-group-name" maxlength="40" placeholder="例如：Zcode" required aria-label="新分组名称">
-        <select id="reuse-group-source" aria-label="要复用的 ZCODE 账号组" hidden></select>
+        <select id="reuse-group-source" aria-label="要复用的账号组" hidden></select>
         <button class="primary" type="submit">新建</button>
       </form>
       <p class="group-hint">启用的账号组按顺序自动兜底；隔离后保留账号，但不参与路由。</p>

@@ -435,8 +435,12 @@ class AccountStore:
                 if account.get("group_id") == (group.get("source_group_id") or selected_id)
             ],
             "reusable_groups": [
-                self._public_group(item, data["accounts"], 0)
-                for item in data["groups"] if item.get("agent_id") == "zcode"
+                {
+                    **self._public_group(item, data["accounts"], 0),
+                    "agent_name": agent_names.get(item.get("agent_id"), "未知 Agent"),
+                }
+                for item in data["groups"]
+                if item.get("agent_id") != agent_id and not item.get("source_group_id")
             ],
         }
 
@@ -685,6 +689,8 @@ class AccountStore:
             group_ids = {group["id"] for group in data["groups"] if group.get("agent_id") == agent_id}
             if any(account.get("group_id") in group_ids for account in data["accounts"]):
                 raise ValueError("请先移走该 Agent 下的账号")
+            if any(group.get("source_group_id") in group_ids for group in data["groups"]):
+                raise ValueError("请先从其他 Agent 移除复用的账号组")
             data["agents"] = [agent for agent in data["agents"] if agent["id"] != agent_id]
             data["groups"] = [group for group in data["groups"] if group.get("agent_id") != agent_id]
             self._write(data)
@@ -705,17 +711,19 @@ class AccountStore:
             self._write(data)
             return self._public_group(group, data["accounts"], len(siblings) + 1)
 
-    def reuse_group(self, source_group_id: str) -> dict:
+    def reuse_group(self, source_group_id: str, agent_id: str = "codex-mcp") -> dict:
         with self.lock:
             data = self._read()
             source = self._find_group(data, source_group_id)
-            mcp = self._find_agent(data, "codex-mcp")
-            if not source or source.get("agent_id") != "zcode" or not mcp:
+            target_agent = self._find_agent(data, agent_id)
+            if not source or source.get("source_group_id") or not target_agent:
                 raise KeyError(source_group_id)
-            siblings = [item for item in data["groups"] if item.get("agent_id") == mcp["id"]]
+            if source.get("agent_id") == agent_id:
+                raise ValueError("不能在同一 Agent 内复用账号组")
+            siblings = [item for item in data["groups"] if item.get("agent_id") == agent_id]
             if any(item.get("source_group_id") == source_group_id for item in siblings):
-                raise ValueError("该 ZCODE 账号组已复用")
-            group = self._new_group(source["name"], mcp["id"], position=len(siblings), source_group_id=source_group_id)
+                raise ValueError("该账号组已复用")
+            group = self._new_group(source["name"], agent_id, position=len(siblings), source_group_id=source_group_id)
             data["groups"].append(group)
             self._write(data)
             return self._public_group(group, data["accounts"], len(siblings) + 1)
@@ -781,7 +789,7 @@ class AccountStore:
             if any(account.get("group_id") == group_id for account in data["accounts"]):
                 raise ValueError("请先移走该组内的账号")
             if any(item.get("source_group_id") == group_id for item in data["groups"]):
-                raise ValueError("请先从 MCP 分页移除该复用组")
+                raise ValueError("请先从其他 Agent 移除该复用组")
             siblings = [item for item in data["groups"] if item.get("agent_id") == group.get("agent_id")]
             if len(siblings) == 1:
                 raise ValueError("每个 Agent 至少保留一个账号组")
@@ -844,7 +852,7 @@ class AccountStore:
             if not group:
                 raise ValueError("分组不存在")
             if group.get("source_group_id"):
-                raise ValueError("MCP 分页只能复用 ZCODE 账号组")
+                raise ValueError("复用组不能直接添加账号")
             if any(item["name"].casefold() == name.casefold() for item in data["accounts"]):
                 raise ValueError("账号名称已存在")
             account_id = uuid.uuid4().hex
@@ -965,7 +973,7 @@ class AccountStore:
             if not target:
                 raise ValueError("目标分组不存在")
             if target.get("source_group_id"):
-                raise ValueError("账号不能移动到 MCP 复用组")
+                raise ValueError("账号不能移动到复用组")
             account = next((item for item in data["accounts"] if item["id"] == account_id), None)
             if not account:
                 raise KeyError(account_id)
@@ -1489,7 +1497,12 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(201, self.app.store.create_agent(str(body.get("name", ""))))
             if path == "/api/groups":
                 if body.get("source_group_id"):
-                    return self._json(201, self.app.store.reuse_group(str(body["source_group_id"])))
+                    return self._json(
+                        201,
+                        self.app.store.reuse_group(
+                            str(body["source_group_id"]), str(body.get("agent_id", "codex-mcp"))
+                        ),
+                    )
                 return self._json(
                     201,
                     self.app.store.create_group(

@@ -40,8 +40,8 @@ function renderAgentTabs() {
   }
 }
 
-function fillGroupSelect(select, selectedId = state.groupId, excludedId = null) {
-  const groups = state.groups.filter((group) => group.id !== excludedId);
+function fillGroupSelect(select, selectedId = state.groupId, excludedId = null, concreteOnly = false) {
+  const groups = state.groups.filter((group) => group.id !== excludedId && (!concreteOnly || !group.source_group_id));
   const signature = JSON.stringify(groups.map((group) => [group.id, group.name]));
   if (select.dataset.signature !== signature) {
     select.replaceChildren();
@@ -76,7 +76,7 @@ function renderGroupControls() {
   fillGroupSelect($("#group-select"));
   const accountGroup = $("#account-group");
   const pendingGroup = $("#account-dialog").open ? accountGroup.value : state.groupId;
-  fillGroupSelect(accountGroup, pendingGroup || state.groupId);
+  fillGroupSelect(accountGroup, pendingGroup || state.groupId, null, true);
   $("#provider-group-name").textContent = `${agent.name} · 连接信息`;
   $("#groups-title").textContent = `${agent.name} · 管理账号组`;
   if (document.activeElement !== $("#rename-group-name")) $("#rename-group-name").value = group.name;
@@ -93,24 +93,33 @@ function renderGroupControls() {
   $("#move-group-up").disabled = index <= 0;
   $("#move-group-down").disabled = index < 0 || index >= state.groups.length - 1;
   const isMcp = agent.kind === "mcp";
-  $("#add-account").hidden = isMcp;
+  $("#add-account").hidden = isMcp || Boolean(group.source_group_id);
+  const modeSelect = $("#group-create-mode");
+  if (isMcp) modeSelect.value = "reuse";
+  modeSelect.hidden = isMcp;
+  const reuseMode = isMcp || modeSelect.value === "reuse";
   const nameInput = $("#new-group-name");
   const sourceSelect = $("#reuse-group-source");
-  nameInput.hidden = isMcp;
-  nameInput.required = !isMcp;
-  sourceSelect.hidden = !isMcp;
-  sourceSelect.required = isMcp;
-  if (isMcp) {
+  nameInput.hidden = reuseMode;
+  nameInput.required = !reuseMode;
+  sourceSelect.hidden = !reuseMode;
+  sourceSelect.required = reuseMode;
+  const submit = $("#create-group-form button");
+  if (reuseMode) {
     sourceSelect.replaceChildren();
     const used = new Set(state.groups.map((item) => item.source_group_id));
     for (const source of state.reusableGroups.filter((item) => !used.has(item.id))) {
       const option = document.createElement("option");
       option.value = source.id;
-      option.textContent = source.name;
+      option.textContent = `${source.agent_name} / ${source.name}`;
       sourceSelect.append(option);
     }
+    if (!sourceSelect.options.length) {
+      sourceSelect.append(new Option("没有可复用的账号组", ""));
+    }
   }
-  $("#create-group-form button").textContent = isMcp ? "复用账号组" : "新建";
+  submit.disabled = reuseMode && !sourceSelect.value;
+  submit.textContent = reuseMode ? "复用" : "新建";
 }
 
 function addedAtLabel(value) {
@@ -340,11 +349,12 @@ function stopPolling() {
 }
 
 function openCreateDialog() {
+  if (currentGroup()?.source_group_id) return toast("复用组不能直接添加账号", true);
   state.authId = null;
   $("#create-step").hidden = false;
   $("#auth-step").hidden = true;
   $("#account-form").reset();
-  fillGroupSelect($("#account-group"));
+  fillGroupSelect($("#account-group"), state.groupId, null, true);
   $("#account-dialog").showModal();
   $("#account-name").focus();
 }
@@ -480,6 +490,7 @@ $("#agent-tabs").addEventListener("click", async (event) => {
   state.groupId = null;
   state.page = 0;
   const agent = state.agents.find((item) => item.id === state.agentId);
+  $("#group-create-mode").value = agent?.kind === "mcp" ? "reuse" : "new";
   if (agent && ["zcode", "grok_build", "hermes"].includes(agent.kind)) state.integration = agent.kind;
   await load();
 });
@@ -653,24 +664,26 @@ $("#create-group-form").addEventListener("submit", async (event) => {
   const button = event.submitter;
   button.disabled = true;
   try {
-    const isMcp = currentAgent()?.kind === "mcp";
+    const reuseMode = currentAgent()?.kind === "mcp" || $("#group-create-mode").value === "reuse";
     const group = await api("/api/groups", {
       method: "POST",
-      body: JSON.stringify(isMcp
-        ? { source_group_id: $("#reuse-group-source").value }
+      body: JSON.stringify(reuseMode
+        ? { source_group_id: $("#reuse-group-source").value, agent_id: state.agentId }
         : { name: $("#new-group-name").value, agent_id: state.agentId }),
     });
     state.groupId = group.id;
     state.page = 0;
     $("#new-group-name").value = "";
     await load();
-    toast(isMcp ? "ZCODE 账号组已复用" : "分组已创建");
+    toast(reuseMode ? "账号组已复用" : "分组已创建");
   } catch (error) {
     toast(error.message, true);
   } finally {
     button.disabled = false;
   }
 });
+
+$("#group-create-mode").addEventListener("change", renderGroupControls);
 
 $("#rename-group-form").addEventListener("submit", async (event) => {
   event.preventDefault();

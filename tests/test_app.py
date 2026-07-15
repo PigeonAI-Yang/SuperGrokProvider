@@ -180,6 +180,16 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "至少保留"):
             self.store.delete_group(empty_agent["group_id"])
 
+    def test_any_agent_can_reuse_another_agents_account_group(self):
+        account = self.store.create("共享账号", "heavy")
+        self.store.update(account["id"], state="ready")
+        reused = self.store.reuse_group("default", "grok-build")
+        snapshot = self.store.public_snapshot("grok-build", reused["id"])
+        self.assertEqual([item["id"] for item in snapshot["accounts"]], [account["id"]])
+        self.assertTrue(snapshot["accounts"][0]["shared"])
+        with self.assertRaisesRegex(ValueError, "同一 Agent"):
+            self.store.reuse_group("default", "zcode")
+
     def test_cooldown_recovers_but_exhausted_does_not(self):
         cool = self.store.create("限流账号")
         spent = self.store.create("耗尽账号")
