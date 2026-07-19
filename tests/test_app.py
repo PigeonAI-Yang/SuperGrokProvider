@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import app  # noqa: E402
-from app import AccountStore, Handler, RouterServer, UsageMonitor, read_auth_identity  # noqa: E402
+from app import AccountStore, Handler, RouterServer, UsageMonitor, find_grok_command, read_auth_identity  # noqa: E402
 
 
 class FakeAuth:
@@ -70,6 +70,7 @@ class IntegrationConfigTests(unittest.TestCase):
         self.assertIn("api_mode: codex_responses", hermes)
         self.assertIn("reasoning_effort: high", hermes)
         grok_build = self.configs["grok_build"]["content"]
+        self.assertIn('default = "supergrok-router"', grok_build)
         self.assertIn('api_backend = "responses"', grok_build)
         self.assertIn("supports_reasoning_effort = true", grok_build)
         self.assertNotIn("grok-composer", hermes + grok_build + self.configs["zcode"]["content"])
@@ -79,6 +80,14 @@ class ServerStartupTests(unittest.TestCase):
     def test_server_rejects_non_loopback_binding_before_startup(self):
         with self.assertRaisesRegex(RuntimeError, "localhost"):
             app.create_router_server("0.0.0.0", 8742)
+
+    def test_grok_command_falls_back_to_the_official_install_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            executable = Path(temp) / ".grok" / "bin" / ("grok.exe" if app.os.name == "nt" else "grok")
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            with patch.object(app.shutil, "which", return_value=None), patch.object(app.Path, "home", return_value=Path(temp)):
+                self.assertEqual(find_grok_command(), str(executable))
 
 
 class StoreTests(unittest.TestCase):
@@ -204,7 +213,7 @@ class StoreTests(unittest.TestCase):
         candidates = self.store.candidates()
         self.assertEqual([item["id"] for item in candidates], [cool["id"]])
 
-    def test_candidates_use_earliest_reset_then_highest_usage(self):
+    def test_candidates_keep_current_then_use_smart_fallback_order(self):
         low = self.store.create("同周期低使用率")
         high = self.store.create("同周期高使用率")
         later = self.store.create("较晚重置")
@@ -215,7 +224,7 @@ class StoreTests(unittest.TestCase):
         ):
             self.store.update(account["id"], state="ready", usage_period_end=end, usage_percent=percent)
         self.store.select(later["id"])
-        self.assertEqual([a["id"] for a in self.store.candidates()], [high["id"], low["id"], later["id"]])
+        self.assertEqual([a["id"] for a in self.store.candidates()], [later["id"], high["id"], low["id"]])
 
     def test_each_account_has_an_independent_five_hour_five_percent_gate(self):
         account = self.store.create("闸门账号")
@@ -393,6 +402,18 @@ class ProviderRotationTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.first["id"])["state"], "exhausted")
         self.assertIsNotNone(self.store.get(self.second["id"])["last_used_at"])
         self.assertEqual(self.store.group_config("default")["active_id"], self.second["id"])
+
+    def test_provider_does_not_block_on_a_usage_refresh_before_inference(self):
+        self.server.usage = Mock()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/v1/responses",
+            data=b'{"model":"grok-4.5","input":"ping"}',
+            headers={"Authorization": "Bearer " + self.store.api_key(), "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            self.assertEqual(json.load(response)["id"], "response_ok")
+        self.server.usage.refresh_one.assert_not_called()
 
     def test_mcp_reuses_zcode_group_and_skips_only_the_account_at_its_gate(self):
         start = app.datetime.now(app.timezone.utc)

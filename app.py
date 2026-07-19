@@ -127,6 +127,7 @@ def integration_configs(
     grok_build = "\n".join(
         (
             "[models]",
+            f'default = "{provider_key}"',
             'default_reasoning_effort = "high"',
             "",
             f"[model.{provider_key}]",
@@ -242,6 +243,14 @@ def atomic_write_json(path: Path, value: dict) -> None:
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(temp, path)
+
+
+def find_grok_command() -> str | None:
+    command = shutil.which("grok")
+    if command:
+        return command
+    installed = Path.home() / ".grok" / "bin" / ("grok.exe" if os.name == "nt" else "grok")
+    return str(installed) if installed.is_file() else None
 
 
 class AccountStore:
@@ -1052,10 +1061,10 @@ class AccountStore:
             # ponytail: xAI billing timestamps are normalized ISO strings; parse only if that contract changes.
             ready.sort(
                 key=lambda a: (
+                    a["id"] != active_id,
                     a.get("usage_period_end") is None,
                     a.get("usage_period_end") or "",
                     -(a.get("usage_percent") if a.get("usage_percent") is not None else -1),
-                    a["id"] != active_id,
                     a["created_at"],
                 )
             )
@@ -1733,8 +1742,6 @@ class Handler(SimpleHTTPRequestHandler):
                 for account in candidates:
                     with self.app.account_lock(account["id"]):
                         if enforce_budget:
-                            if self.app.usage:
-                                account = self.app.usage.refresh_one(account["id"])
                             if account.get("state") != "ready":
                                 continue
                             if not self.app.store.budget_allows(account["id"]):
@@ -1885,7 +1892,7 @@ def create_router_server(
     if singleton is False:
         raise RuntimeError("SuperGrok Router 已在运行")
     try:
-        grok_command = shutil.which("grok")
+        grok_command = find_grok_command()
         if not grok_command:
             raise RuntimeError("未找到官方 Grok Build CLI，请先安装并确保 grok 在 PATH 中")
         store = AccountStore(data_dir or default_data_dir())
