@@ -280,10 +280,12 @@ function renderConfig() {
     : (effective.enabled ? `系统 · ${effective.server}` : "系统代理未开启");
   $("#proxy-status").textContent = proxyText;
   $("#drawer-proxy").textContent = proxyText;
-  $("#proxy-mode").value = proxy.mode;
-  $("#proxy-url").value = proxy.url || "";
-  $("#proxy-url").hidden = proxy.mode !== "custom";
-  $("#proxy-url").required = proxy.mode === "custom";
+  if ($("#proxy-form").dataset.dirty !== "true") {
+    $("#proxy-mode").value = proxy.mode;
+    $("#proxy-url").value = proxy.url || "";
+    $("#proxy-url").hidden = proxy.mode !== "custom";
+    $("#proxy-url").required = proxy.mode === "custom";
+  }
   $("#upstream-value").textContent = state.config.upstream;
   renderIntegration();
 }
@@ -541,6 +543,8 @@ function hideDrawers() {
   $("#account-drawer").hidden = true;
 }
 function closeDetails() {
+  delete $("#proxy-form").dataset.dirty;
+  renderConfig();
   hideDrawers();
   $(state.drawerTrigger)?.focus();
 }
@@ -549,10 +553,14 @@ $("#close-groups").addEventListener("click", closeDetails);
 $("#close-account-drawer").addEventListener("click", closeDetails);
 $("#drawer-backdrop").addEventListener("click", closeDetails);
 $("#proxy-mode").addEventListener("change", (event) => {
+  $("#proxy-form").dataset.dirty = "true";
   const custom = event.target.value === "custom";
   $("#proxy-url").hidden = !custom;
   $("#proxy-url").required = custom;
   if (custom) $("#proxy-url").focus();
+});
+$("#proxy-url").addEventListener("input", () => {
+  $("#proxy-form").dataset.dirty = "true";
 });
 $("#proxy-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -563,6 +571,7 @@ $("#proxy-form").addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({ mode: $("#proxy-mode").value, url: $("#proxy-url").value }),
     });
+    delete $("#proxy-form").dataset.dirty;
     await load();
     toast("代理设置已应用");
   } catch (error) {
