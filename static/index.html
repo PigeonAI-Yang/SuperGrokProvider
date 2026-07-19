@@ -72,7 +72,7 @@
           <button type="button" data-copy="provider-key">复制</button>
         </div>
         <div class="proxy-summary">
-          <span>Windows 系统代理</span>
+          <span>上游代理</span>
           <strong id="proxy-status">正在读取</strong>
         </div>
         <button class="secondary wide" id="open-details" type="button">连接详情</button>
@@ -237,10 +237,22 @@
       </div>
       <button type="button" id="close-details">关闭</button>
     </div>
+    <form id="proxy-form" class="proxy-form">
+      <label for="proxy-mode">上游代理</label>
+      <div class="proxy-controls">
+        <select id="proxy-mode" aria-label="代理模式">
+          <option value="system">跟随 Windows 系统代理</option>
+          <option value="custom">自定义 HTTP/HTTPS 代理</option>
+        </select>
+        <button class="primary" type="submit">应用</button>
+      </div>
+      <input id="proxy-url" type="url" placeholder="http://127.0.0.1:7890" aria-label="自定义代理地址" hidden>
+      <p>切换后立即用于额度、模型和推理请求。</p>
+    </form>
     <dl class="detail-list">
       <div><dt>轮换策略</dt><dd>当前 Agent 内按账号组顺序自动兜底</dd></div>
       <div><dt>官方上游</dt><dd id="upstream-value">正在加载</dd></div>
-      <div><dt>系统代理</dt><dd id="drawer-proxy">正在加载</dd></div>
+      <div><dt>当前代理</dt><dd id="drawer-proxy">正在加载</dd></div>
       <div><dt>账号隔离</dt><dd>每个账号使用独立 GROK_HOME</dd></div>
       <div><dt>额度监控</dt><dd>启动即检查，此后每 30–35 分钟全量轮询</dd></div>
     </dl>

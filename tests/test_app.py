@@ -118,6 +118,16 @@ class StoreTests(unittest.TestCase):
         self.store.delete(account["id"])
         self.assertFalse(home.parent.exists())
 
+    def test_proxy_setting_is_persisted_and_validated(self):
+        self.assertEqual(self.store.proxy_config(), {"mode": "system", "url": None})
+        custom = self.store.update_proxy("custom", "http://127.0.0.1:7890/")
+        self.assertEqual(custom, {"mode": "custom", "url": "http://127.0.0.1:7890"})
+        self.assertEqual(AccountStore(Path(self.temp.name)).proxy_config(), custom)
+        with self.assertRaisesRegex(ValueError, "HTTP/HTTPS"):
+            self.store.update_proxy("custom", "socks5://127.0.0.1:7890")
+        with self.assertRaisesRegex(ValueError, "字符串"):
+            self.store.update_proxy("custom", None)
+
     def test_membership_type_is_validated(self):
         with self.assertRaisesRegex(ValueError, "会员类型"):
             self.store.create("错误套餐", "premium")
@@ -265,6 +275,21 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(handler.proxies["https"], "http://127.0.0.1:7890")
         opener.open.assert_called_once()
 
+    def test_custom_proxy_overrides_system_proxy(self):
+        opener = Mock()
+        with patch.object(app, "system_proxy_settings") as system, patch.object(
+            app, "build_opener", return_value=opener
+        ) as build:
+            app.open_with_system_proxy(
+                urllib.request.Request("https://api.x.ai/v1/models"),
+                proxy_config={"mode": "custom", "url": "http://127.0.0.1:7890"},
+            )
+        system.assert_not_called()
+        self.assertEqual(
+            build.call_args.args[0].proxies,
+            {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
+        )
+
     def test_usage_monitor_exhausts_and_restores_account(self):
         account = self.store.create("额度账号")
         home = self.store.account_home(account["id"])
@@ -393,6 +418,21 @@ class ProviderRotationTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.temp.cleanup()
+
+    def test_management_proxy_switch_is_immediate_and_visible_in_config(self):
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/proxy",
+            data=b'{"mode":"custom","url":"http://127.0.0.1:7890"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            self.assertEqual(json.load(response)["mode"], "custom")
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{self.server.server_port}/api/config", timeout=5
+        ) as response:
+            proxy = json.load(response)["proxy"]
+        self.assertEqual(proxy["effective"]["server"], "http://127.0.0.1:7890")
 
     def test_provider_rotates_after_explicit_exhaustion(self):
         request = urllib.request.Request(

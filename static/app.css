@@ -294,13 +294,24 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
   background: #121615;
   box-shadow: -24px 0 70px rgb(0 0 0 / 0.4);
 }
+#details-drawer { padding: 20px 28px; }
 #account-drawer { padding-top: 22px; padding-bottom: 22px; }
 #account-drawer .group-section { margin-top: 18px; padding-top: 16px; }
 .drawer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .drawer-heading h2 { margin: 0; font-size: 26px; }
 .drawer-heading button { min-height: 34px; color: var(--muted); background: transparent; border-color: var(--line); }
-.detail-list { display: grid; margin: 28px 0; }
+.proxy-form { margin-top: 12px; padding: 9px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.proxy-form > label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 12px; }
+.proxy-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.proxy-controls select, .proxy-controls button { min-height: 38px; }
+#proxy-form .proxy-controls button { margin: 0; padding: 0 16px; }
+.proxy-form > input { margin-top: 8px; }
+.proxy-form > p { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
+.detail-list { display: grid; margin: 8px 0 10px; }
 .detail-list > div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 16px; padding: 15px 0; border-bottom: 1px solid var(--line); }
+#details-drawer .detail-list > div { padding: 8px 0; }
+#details-drawer pre { margin-bottom: 7px; padding: 8px 10px; line-height: 1.35; }
+#details-drawer > .wide { min-height: 36px; }
 .detail-list dt { color: var(--muted); font-size: 12px; }
 .detail-list dd { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 13px; }
 .account-meta { grid-template-columns: 1fr 1fr; gap: 0 18px; margin: 12px 0; }

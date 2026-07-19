@@ -273,9 +273,17 @@ function renderConfig() {
   $("#provider-url").value = state.config.provider_url;
   $("#provider-key").value = state.config.api_key;
   $("#client-example").textContent = `OPENAI_BASE_URL=${state.config.provider_url}\nOPENAI_API_KEY=sgr_••••••••••••`;
-  const proxyText = state.config.system_proxy.enabled ? `已开启 ${state.config.system_proxy.server}` : "已关闭";
+  const proxy = state.config.proxy;
+  const effective = proxy.effective;
+  const proxyText = proxy.mode === "custom"
+    ? `自定义 · ${effective.server}`
+    : (effective.enabled ? `系统 · ${effective.server}` : "系统代理未开启");
   $("#proxy-status").textContent = proxyText;
   $("#drawer-proxy").textContent = proxyText;
+  $("#proxy-mode").value = proxy.mode;
+  $("#proxy-url").value = proxy.url || "";
+  $("#proxy-url").hidden = proxy.mode !== "custom";
+  $("#proxy-url").required = proxy.mode === "custom";
   $("#upstream-value").textContent = state.config.upstream;
   renderIntegration();
 }
@@ -540,6 +548,29 @@ $("#close-details").addEventListener("click", closeDetails);
 $("#close-groups").addEventListener("click", closeDetails);
 $("#close-account-drawer").addEventListener("click", closeDetails);
 $("#drawer-backdrop").addEventListener("click", closeDetails);
+$("#proxy-mode").addEventListener("change", (event) => {
+  const custom = event.target.value === "custom";
+  $("#proxy-url").hidden = !custom;
+  $("#proxy-url").required = custom;
+  if (custom) $("#proxy-url").focus();
+});
+$("#proxy-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    await api("/api/proxy", {
+      method: "POST",
+      body: JSON.stringify({ mode: $("#proxy-mode").value, url: $("#proxy-url").value }),
+    });
+    await load();
+    toast("代理设置已应用");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
 $("#open-integrations").addEventListener("click", () => {
   $("#details-drawer").hidden = true;
   $("#integration-drawer").hidden = false;

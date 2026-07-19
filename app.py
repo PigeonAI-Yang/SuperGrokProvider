@@ -232,8 +232,17 @@ def system_proxy_settings() -> tuple[dict[str, str], dict]:
     return values, {"enabled": bool(values), "server": raw if values else None}
 
 
-def open_with_system_proxy(request: Request, timeout: int = 600):
-    proxies, _ = system_proxy_settings()
+def effective_proxy_settings(config: dict | None = None) -> tuple[dict[str, str], dict]:
+    if config and config.get("mode") == "custom":
+        address = str(config.get("url") or "")
+        proxies = {"http": address, "https": address}
+        return proxies, {"enabled": True, "server": address, "mode": "custom"}
+    proxies, summary = system_proxy_settings()
+    return proxies, {**summary, "mode": "system"}
+
+
+def open_with_system_proxy(request: Request, timeout: int = 600, proxy_config: dict | None = None):
+    proxies, _ = effective_proxy_settings(proxy_config)
     # An explicit ProxyHandler prevents urllib from using inherited proxy env or silently changing policy.
     return build_opener(ProxyHandler(proxies)).open(request, timeout=timeout)
 
@@ -310,6 +319,7 @@ class AccountStore:
             for account in data.get("accounts", []):
                 if not isinstance(account.get("budget_policy"), dict):
                     account["budget_policy"] = default_budget_policy()
+            data.setdefault("proxy", {"mode": "system", "url": None})
             data["version"] = 4
             if data != original:
                 self._write(data)
@@ -363,7 +373,13 @@ class AccountStore:
             agent["active_group_id"] = group["id"]
         mcp_group = next(group for group in groups if group["agent_id"] == "codex-mcp")
         mcp_group.update(name="ZCODE 默认组", source_group_id="default")
-        return {"version": 4, "agents": agents, "groups": groups, "accounts": []}
+        return {
+            "version": 4,
+            "agents": agents,
+            "groups": groups,
+            "accounts": [],
+            "proxy": {"mode": "system", "url": None},
+        }
 
     @classmethod
     def _migrate_v1(cls, data: dict) -> dict:
@@ -433,6 +449,37 @@ class AccountStore:
     def snapshot(self) -> dict:
         with self.lock:
             return self._read()
+
+    def proxy_config(self) -> dict:
+        config = self.snapshot().get("proxy") or {}
+        return {
+            "mode": "custom" if config.get("mode") == "custom" else "system",
+            "url": config.get("url") or None,
+        }
+
+    def update_proxy(self, mode: str, url: str | None = None) -> dict:
+        mode = mode.strip().lower()
+        if mode not in {"system", "custom"}:
+            raise ValueError("代理模式必须是 system 或 custom")
+        normalized_url = None
+        if mode == "custom":
+            if not isinstance(url, str):
+                raise ValueError("自定义代理地址必须是字符串")
+            normalized_url = (url or "").strip().rstrip("/")
+            parsed = urlsplit(normalized_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise ValueError("自定义代理必须是有效的 HTTP/HTTPS 地址")
+            if parsed.username or parsed.password:
+                raise ValueError("当前版本不保存带账号密码的代理地址")
+            try:
+                parsed.port
+            except ValueError as exc:
+                raise ValueError("自定义代理端口无效") from exc
+        with self.lock:
+            data = self._read()
+            data["proxy"] = {"mode": mode, "url": normalized_url}
+            self._write(data)
+        return self.proxy_config()
 
     def public_snapshot(self, agent_id: str = "zcode", group_id: str | None = None) -> dict:
         data = self.snapshot()
@@ -1312,7 +1359,9 @@ class UsageMonitor:
             )
             for attempt in range(3):
                 try:
-                    with open_with_system_proxy(request, timeout=30) as response:
+                    with open_with_system_proxy(
+                        request, timeout=30, proxy_config=self.store.proxy_config()
+                    ) as response:
                         payload = json.load(response)
                     break
                 except HTTPError as exc:
@@ -1494,6 +1543,10 @@ class Handler(SimpleHTTPRequestHandler):
                         "provider_url": provider_url,
                         "api_key": api_key,
                         "upstream": self.app.upstream,
+                        "proxy": {
+                            **self.app.store.proxy_config(),
+                            "effective": effective_proxy_settings(self.app.store.proxy_config())[1],
+                        },
                         "system_proxy": system_proxy_settings()[1],
                         "integrations": integration_configs(
                             provider_url, api_key, agent["id"], agent["name"]
@@ -1531,6 +1584,11 @@ class Handler(SimpleHTTPRequestHandler):
             body = self._read_json()
             if path == "/api/agents":
                 return self._json(201, self.app.store.create_agent(str(body.get("name", ""))))
+            if path == "/api/proxy":
+                return self._json(
+                    200,
+                    self.app.store.update_proxy(str(body.get("mode", "")), body.get("url")),
+                )
             if path == "/api/groups":
                 if body.get("source_group_id"):
                     return self._json(
@@ -1711,7 +1769,9 @@ class Handler(SimpleHTTPRequestHandler):
                     headers={"Authorization": "Bearer " + (token or ""), "Accept": "application/json"},
                 )
                 try:
-                    with open_with_system_proxy(request, timeout=30) as response:
+                    with open_with_system_proxy(
+                        request, timeout=30, proxy_config=self.app.store.proxy_config()
+                    ) as response:
                         payload = json.load(response)
                     break
                 except HTTPError as exc:
@@ -1834,7 +1894,9 @@ class Handler(SimpleHTTPRequestHandler):
                 headers["Content-Length"] = str(len(body))
             request = Request(target, data=body or None, headers=headers, method=self.command)
             try:
-                response = open_with_system_proxy(request, timeout=600)
+                response = open_with_system_proxy(
+                    request, timeout=600, proxy_config=self.app.store.proxy_config()
+                )
             except HTTPError as exc:
                 response = exc
             response_headers = list(response.headers.items())
