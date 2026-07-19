@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import app  # noqa: E402
-from app import AccountStore, Handler, RouterServer, UsageMonitor, find_grok_command, read_auth_identity  # noqa: E402
+from app import AccountStore, Handler, RouterServer, UsageMonitor, configure_grok_cli_environment, find_grok_command, read_auth_identity  # noqa: E402
 
 
 class FakeAuth:
@@ -88,6 +88,13 @@ class ServerStartupTests(unittest.TestCase):
             executable.touch()
             with patch.object(app.shutil, "which", return_value=None), patch.object(app.Path, "home", return_value=Path(temp)):
                 self.assertEqual(find_grok_command(), str(executable))
+
+    def test_grok_cli_environment_routes_isolated_homes_through_the_grok_build_agent(self):
+        with patch.object(app.os, "name", "posix"), patch.dict(app.os.environ, {}, clear=True):
+            configure_grok_cli_environment("http://127.0.0.1:8742/v1", "grok-key", "mcp-key")
+            self.assertEqual(app.os.environ["GROK_MODELS_BASE_URL"], "http://127.0.0.1:8742/v1")
+            self.assertEqual(app.os.environ["GROK_CODE_XAI_API_KEY"], "grok-key")
+            self.assertEqual(app.os.environ["SGR_MCP_API_KEY"], "mcp-key")
 
 
 class StoreTests(unittest.TestCase):

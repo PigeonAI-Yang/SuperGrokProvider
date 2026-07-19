@@ -253,6 +253,33 @@ def find_grok_command() -> str | None:
     return str(installed) if installed.is_file() else None
 
 
+def configure_grok_cli_environment(provider_url: str, grok_build_key: str, mcp_key: str) -> None:
+    values = {
+        "GROK_MODELS_BASE_URL": provider_url,
+        "GROK_MODELS_LIST_URL": provider_url + "/models",
+        "GROK_CODE_XAI_API_KEY": grok_build_key,
+        "SGR_GROK_BUILD_API_KEY": grok_build_key,
+        "SGR_MCP_API_KEY": mcp_key,
+    }
+    os.environ.update(values)
+    if os.name != "nt":
+        return
+    import ctypes
+    import winreg
+
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+        for name, value in values.items():
+            winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+    try:
+        result = ctypes.c_ulong()
+        environment = ctypes.create_unicode_buffer("Environment")
+        ctypes.windll.user32.SendMessageTimeoutW(
+            0xFFFF, 0x001A, 0, ctypes.cast(environment, ctypes.c_void_p), 0x0002, 1000, ctypes.byref(result)
+        )
+    except (OSError, TypeError, ValueError, ctypes.ArgumentError):
+        pass
+
+
 class AccountStore:
     def __init__(self, root: Path):
         self.root = root.resolve()
@@ -1896,6 +1923,11 @@ def create_router_server(
         if not grok_command:
             raise RuntimeError("未找到官方 Grok Build CLI，请先安装并确保 grok 在 PATH 中")
         store = AccountStore(data_dir or default_data_dir())
+        configure_grok_cli_environment(
+            f"http://{host}:{port}/v1",
+            store.agent_config("grok-build")["api_key"],
+            store.agent_config("codex-mcp")["api_key"],
+        )
         auth = AuthorizationManager(store, grok_command)
         version_result = subprocess.run(
             [grok_command, "--version"], capture_output=True, text=True, timeout=10, check=False
