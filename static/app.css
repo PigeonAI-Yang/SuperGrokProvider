@@ -295,9 +295,10 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
   box-shadow: -24px 0 70px rgb(0 0 0 / 0.4);
 }
 #details-drawer { padding: 20px 28px; }
-#account-drawer { display: flex; flex-direction: column; overflow: hidden; padding-top: 22px; padding-bottom: 22px; }
+#account-drawer { display: flex; flex-direction: column; overflow: hidden; padding-top: 18px; padding-bottom: 18px; }
 #account-drawer > .drawer-heading, #account-drawer > .group-section, #account-drawer > .account-meta { flex: 0 0 auto; }
-#account-drawer .group-section { margin-top: 18px; padding-top: 16px; }
+#account-drawer .group-section { margin-top: 10px; padding-top: 10px; }
+#account-drawer .inline-form input, #account-drawer .inline-form button { min-height: 38px; }
 .drawer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .drawer-heading h2 { margin: 0; font-size: 26px; }
 .drawer-heading button { min-height: 34px; color: var(--muted); background: transparent; border-color: var(--line); }
@@ -315,8 +316,8 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 #details-drawer > .wide { min-height: 36px; }
 .detail-list dt { color: var(--muted); font-size: 12px; }
 .detail-list dd { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 13px; }
-.account-meta { grid-template-columns: 1fr 1fr; gap: 0 18px; margin: 12px 0; }
-.account-meta > div { display: block; padding: 6px 0; }
+.account-meta { grid-template-columns: 1fr 1fr; gap: 0 18px; margin: 8px 0; }
+.account-meta > div { display: block; padding: 4px 0; }
 .account-meta dt { margin-bottom: 4px; }
 .account-models { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .model-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -351,6 +352,13 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .budget-form button { min-height: 38px; margin: 0; }
 .budget-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .budget-actions button { min-height: 36px; font-size: 11px; }
+.budget-section > summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
+.budget-section > summary::-webkit-details-marker { display: none; }
+.budget-section > summary::after { content: "展开"; color: var(--accent); font-size: 11px; }
+.budget-section[open] > summary::after { content: "收起"; }
+.budget-section > summary strong { font-size: 12px; }
+.budget-section > summary span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.budget-panel { padding-top: 12px; }
 .integration-entry { margin-top: 8px; }
 .integration-drawer { width: 600px; padding: 24px 26px; overflow: hidden; }
 .integration-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 22px 0 16px; }

@@ -423,6 +423,7 @@ function openAccountDrawer(id) {
   $("#account-drawer-location").textContent = group ? `${group.agent_name} / ${group.name}` : "未知";
   $("#account-drawer-created").textContent = addedAtLabel(account.created_at).replace("添加于 ", "");
   const policy = account.budget_policy || {};
+  $("#budget-section").open = false;
   $("#budget-enabled").checked = policy.enabled !== false;
   $("#budget-hours").value = policy.window_hours ?? 5;
   $("#budget-percent").value = policy.limit_percent ?? 5;
