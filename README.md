@@ -48,7 +48,7 @@ cd C:\path\to\supergrok-router
 
 “连接详情 → Zcode / Hermes / Grok Build 配置”提供三套可复制片段。它们按各客户端的真实字段分别发送推理强度，同时 Router 保持透明转发、不按客户端改写请求：
 
-- Zcode Desktop：`kind: openai-compatible` 与 `modelCatalog.overrides`，通过 `providerOptionsByLevel` 把 low / medium / high 映射为真实 `reasoning_effort` 请求字段。
+- Zcode Desktop：`kind: openai-compatible` 与 `modelCatalog.overrides`，通过 `providerOptionsByLevel` 把 low / medium / high / xhigh 映射为真实 `reasoning_effort` 请求字段。
 - Hermes：`api_mode: codex_responses` 与 `agent.reasoning_effort`。
 - Grok Build：`api_backend = "responses"`、`supports_reasoning_effort` 与 `reasoning_effort`。
 

@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 import unittest
 import urllib.error
 import urllib.request
@@ -16,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import app  # noqa: E402
-from app import AccountStore, Handler, RouterServer, UsageMonitor, configure_grok_cli_environment, find_grok_command, read_auth_identity  # noqa: E402
+from app import AccountStore, Handler, RouterServer, UsageMonitor, configure_grok_cli_environment, configure_grok_model_override, find_grok_command, read_auth_identity  # noqa: E402
 
 
 class FakeAuth:
@@ -57,7 +58,7 @@ class IntegrationConfigTests(unittest.TestCase):
         payload = json.loads(self.configs["zcode"]["content"])
         reasoning = payload["modelCatalog"]["overrides"]["supergrok-router/grok-4.5"]["reasoning"]
         self.assertEqual(payload["provider"]["supergrok-router"]["kind"], "openai-compatible")
-        self.assertEqual(reasoning["levels"], ["low", "medium", "high"])
+        self.assertEqual(reasoning["levels"], ["low", "medium", "high", "xhigh"])
         self.assertEqual(reasoning["defaultLevel"], "high")
         self.assertEqual(
             reasoning["providerOptionsByLevel"]["low"]["openaiCompatible"],
@@ -70,7 +71,8 @@ class IntegrationConfigTests(unittest.TestCase):
         self.assertIn("api_mode: codex_responses", hermes)
         self.assertIn("reasoning_effort: high", hermes)
         grok_build = self.configs["grok_build"]["content"]
-        self.assertIn('default = "supergrok-router"', grok_build)
+        self.assertIn('default = "grok-4.5"', grok_build)
+        self.assertIn('[model."grok-4.5"]', grok_build)
         self.assertIn('api_backend = "responses"', grok_build)
         self.assertIn("supports_reasoning_effort = true", grok_build)
         self.assertNotIn("grok-composer", hermes + grok_build + self.configs["zcode"]["content"])
@@ -95,6 +97,29 @@ class ServerStartupTests(unittest.TestCase):
             self.assertEqual(app.os.environ["GROK_MODELS_BASE_URL"], "http://127.0.0.1:8742/v1")
             self.assertEqual(app.os.environ["GROK_CODE_XAI_API_KEY"], "grok-key")
             self.assertEqual(app.os.environ["SGR_MCP_API_KEY"], "mcp-key")
+
+    def test_grok_model_override_wins_over_prefetched_capabilities(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "config.toml"
+            path.write_text('[models]\ndefault = "grok-4.5"\n\n[model.other]\nmodel = "other"\n', encoding="utf-8")
+            configure_grok_model_override(path, "http://127.0.0.1:8742/v1")
+            configure_grok_model_override(path, "http://127.0.0.1:8742/v1")
+            text = path.read_text(encoding="utf-8")
+            parsed = tomllib.loads(text)
+            self.assertEqual(text.count('[model."grok-4.5"]'), 1)
+            self.assertEqual(parsed["model"]["other"]["model"], "other")
+            self.assertEqual(
+                parsed["model"]["grok-4.5"],
+                {
+                    "model": "grok-4.5",
+                    "name": "Grok 4.5 · SuperGrok Router",
+                    "base_url": "http://127.0.0.1:8742/v1",
+                    "env_key": "SGR_GROK_BUILD_API_KEY",
+                    "api_backend": "responses",
+                    "supports_reasoning_effort": True,
+                    "context_window": 500000,
+                },
+            )
 
 
 class StoreTests(unittest.TestCase):
@@ -645,7 +670,7 @@ class ProviderRotationTests(unittest.TestCase):
                 models = result["models"]
         self.assertEqual(opener.call_args.args[0].headers["Authorization"], "Bearer selected-token")
         self.assertEqual(result["source"], "account")
-        self.assertEqual(models[0]["reasoning"], "low / medium / high（默认 high）")
+        self.assertEqual(models[0]["reasoning"], "low / medium / high / xhigh（默认 high）")
         self.assertIn("默认低", models[1]["reasoning"])
         self.assertIn("Agent 数", models[2]["reasoning"])
         self.assertEqual(models[3]["reasoning"], "固定关闭")

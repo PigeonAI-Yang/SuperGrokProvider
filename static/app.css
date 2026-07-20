@@ -295,7 +295,8 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
   box-shadow: -24px 0 70px rgb(0 0 0 / 0.4);
 }
 #details-drawer { padding: 20px 28px; }
-#account-drawer { padding-top: 22px; padding-bottom: 22px; }
+#account-drawer { display: flex; flex-direction: column; overflow: hidden; padding-top: 22px; padding-bottom: 22px; }
+#account-drawer > .drawer-heading, #account-drawer > .group-section, #account-drawer > .account-meta { flex: 0 0 auto; }
 #account-drawer .group-section { margin-top: 18px; padding-top: 16px; }
 .drawer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .drawer-heading h2 { margin: 0; font-size: 26px; }
@@ -317,12 +318,12 @@ pre { overflow: hidden; margin: 0 0 10px; padding: 12px; border: 1px solid var(-
 .account-meta { grid-template-columns: 1fr 1fr; gap: 0 18px; margin: 12px 0; }
 .account-meta > div { display: block; padding: 6px 0; }
 .account-meta dt { margin-bottom: 4px; }
-.account-models { padding-top: 10px; border-top: 1px solid var(--line); }
+.account-models { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .model-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .model-heading .drawer-label { margin: 0; }
 .model-heading span { color: var(--muted); font-size: 11px; }
 .model-heading span.error { color: var(--danger); }
-.model-list { display: grid; margin-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.model-list { display: grid; align-content: start; min-height: 0; margin-top: 8px; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .model-list > div { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); align-items: center; gap: 10px; min-width: 0; padding: 6px 4px; border-bottom: 1px solid var(--line); }
 .model-list strong, .model-list span { display: block; overflow-wrap: anywhere; }
 .model-list strong { color: var(--text); font: 600 10.5px/1.25 ui-monospace, "Cascadia Mono", monospace; }

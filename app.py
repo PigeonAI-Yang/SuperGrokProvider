@@ -48,7 +48,7 @@ def default_budget_policy() -> dict:
 
 def model_reasoning_capability(model_id: str) -> str:
     if model_id == "grok-4.5":
-        return "low / medium / high（默认 high）"
+        return "low / medium / high / xhigh（默认 high）"
     if model_id == "grok-4.3":
         return "无 / 低 / 中 / 高（默认低）"
     if model_id.startswith("grok-4.20-multi-agent"):
@@ -127,22 +127,22 @@ def integration_configs(
     grok_build = "\n".join(
         (
             "[models]",
-            f'default = "{provider_key}"',
+            'default = "grok-4.5"',
             'default_reasoning_effort = "high"',
             "",
-            f"[model.{provider_key}]",
+            '[model."grok-4.5"]',
             'model = "grok-4.5"',
+            f"name = {json.dumps('Grok 4.5 · SuperGrok Router', ensure_ascii=False)}",
             f"base_url = {quoted_url}",
             'api_backend = "responses"',
             f"api_key = {quoted_key}",
             "supports_reasoning_effort = true",
-            'reasoning_effort = "high"',
             "context_window = 500000",
         )
     )
     provider_options_by_level = {
         level: {"openaiCompatible": {"reasoningEffort": level}}
-        for level in ("low", "medium", "high")
+        for level in ("low", "medium", "high", "xhigh")
     }
     zcode_content = json.dumps(
         {
@@ -167,7 +167,7 @@ def integration_configs(
                         "supportsReasoning": True,
                         "reasoning": {
                             "enabled": True,
-                            "levels": ["low", "medium", "high"],
+                            "levels": ["low", "medium", "high", "xhigh"],
                             "defaultLevel": "high",
                             "providerOptionsByLevel": provider_options_by_level,
                         },
@@ -182,7 +182,7 @@ def integration_configs(
         "zcode": {
             "label": "Zcode Desktop",
             "filename": r"%USERPROFILE%\.zcode\v2\config.json",
-            "note": f"同时合并 provider.{provider_key} 与 modelCatalog.overrides；low / medium / high 会映射到上游 reasoning_effort。",
+            "note": f"同时合并 provider.{provider_key} 与 modelCatalog.overrides；low / medium / high / xhigh 会映射到上游 reasoning_effort。",
             "content": zcode_content,
         },
         "hermes": {
@@ -194,7 +194,7 @@ def integration_configs(
         "grok_build": {
             "label": "Grok Build",
             "filename": "Grok Build settings.toml",
-            "note": "合并到现有设置；默认 high，仍可由客户端请求覆盖为 low / medium / high。",
+            "note": "合并到现有设置；默认 high，仍可由客户端请求覆盖为 low / medium / high / xhigh。",
             "content": grok_build,
         },
     }
@@ -287,6 +287,31 @@ def configure_grok_cli_environment(provider_url: str, grok_build_key: str, mcp_k
         )
     except (OSError, TypeError, ValueError, ctypes.ArgumentError):
         pass
+
+
+def configure_grok_model_override(config_path: Path, provider_url: str) -> None:
+    section = 'model."grok-4.5"'
+    block = "\n".join(
+        (
+            f"[{section}]",
+            'model = "grok-4.5"',
+            'name = "Grok 4.5 · SuperGrok Router"',
+            f"base_url = {json.dumps(provider_url, ensure_ascii=False)}",
+            'env_key = "SGR_GROK_BUILD_API_KEY"',
+            'api_backend = "responses"',
+            "supports_reasoning_effort = true",
+            "context_window = 500000",
+        )
+    )
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    current = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    # ponytail: replace only our owned table; add a TOML writer only if nested edits become necessary.
+    pattern = re.compile(rf"(?ms)^\[{re.escape(section)}\]\r?\n.*?(?=^\[|\Z)")
+    updated = pattern.sub(block + "\n\n", current, count=1) if pattern.search(current) else current.rstrip() + "\n\n" + block + "\n"
+    if updated != current:
+        temp = config_path.with_suffix(config_path.suffix + ".tmp")
+        temp.write_text(updated, encoding="utf-8")
+        os.replace(temp, config_path)
 
 
 class AccountStore:
@@ -1989,6 +2014,9 @@ def create_router_server(
             f"http://{host}:{port}/v1",
             store.agent_config("grok-build")["api_key"],
             store.agent_config("codex-mcp")["api_key"],
+        )
+        configure_grok_model_override(
+            Path.home() / ".grok" / "config.toml", f"http://{host}:{port}/v1"
         )
         auth = AuthorizationManager(store, grok_command)
         version_result = subprocess.run(
