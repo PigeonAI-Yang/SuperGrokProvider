@@ -70,9 +70,11 @@ class IntegrationConfigTests(unittest.TestCase):
         hermes = self.configs["hermes"]["content"]
         self.assertIn("api_mode: codex_responses", hermes)
         self.assertIn("reasoning_effort: high", hermes)
-        grok_build = self.configs["grok_build"]["content"]
-        self.assertIn('default = "grok-4.5"', grok_build)
-        self.assertIn('[model."grok-4.5"]', grok_build)
+        grok_build = app.integration_configs(
+            self.url, self.key, "grok-build", "GROK BUILD"
+        )["grok_build"]["content"]
+        self.assertIn('default = "supergrok-router-grok-bui"', grok_build)
+        self.assertIn('[model.supergrok-router-grok-bui]', grok_build)
         self.assertIn('api_backend = "responses"', grok_build)
         self.assertIn("supports_reasoning_effort = true", grok_build)
         self.assertNotIn("grok-composer", hermes + grok_build + self.configs["zcode"]["content"])
@@ -101,15 +103,20 @@ class ServerStartupTests(unittest.TestCase):
     def test_grok_model_override_wins_over_prefetched_capabilities(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "config.toml"
-            path.write_text('[models]\ndefault = "grok-4.5"\n\n[model.other]\nmodel = "other"\n', encoding="utf-8")
+            path.write_text(
+                '[models]\ndefault = "grok-4.5"\n\n[model.other]\nmodel = "other"\n\n'
+                '[model."grok-4.5"]\nmodel = "grok-4.5"\napi_backend = "responses"\n',
+                encoding="utf-8",
+            )
             configure_grok_model_override(path, "http://127.0.0.1:8742/v1")
             configure_grok_model_override(path, "http://127.0.0.1:8742/v1")
             text = path.read_text(encoding="utf-8")
             parsed = tomllib.loads(text)
-            self.assertEqual(text.count('[model."grok-4.5"]'), 1)
+            self.assertNotIn('[model."grok-4.5"]', text)
             self.assertEqual(parsed["model"]["other"]["model"], "other")
+            self.assertEqual(parsed["models"]["default"], "supergrok-router-grok-bui")
             self.assertEqual(
-                parsed["model"]["grok-4.5"],
+                parsed["model"]["supergrok-router-grok-bui"],
                 {
                     "model": "grok-4.5",
                     "name": "Grok 4.5 · SuperGrok Router",

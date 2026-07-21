@@ -127,10 +127,10 @@ def integration_configs(
     grok_build = "\n".join(
         (
             "[models]",
-            'default = "grok-4.5"',
+            f'default = "{provider_key}"',
             'default_reasoning_effort = "high"',
             "",
-            '[model."grok-4.5"]',
+            f"[model.{provider_key}]",
             'model = "grok-4.5"',
             f"name = {json.dumps('Grok 4.5 · SuperGrok Router', ensure_ascii=False)}",
             f"base_url = {quoted_url}",
@@ -290,7 +290,8 @@ def configure_grok_cli_environment(provider_url: str, grok_build_key: str, mcp_k
 
 
 def configure_grok_model_override(config_path: Path, provider_url: str) -> None:
-    section = 'model."grok-4.5"'
+    model_id = "supergrok-router-grok-bui"
+    section = f"model.{model_id}"
     block = "\n".join(
         (
             f"[{section}]",
@@ -307,7 +308,22 @@ def configure_grok_model_override(config_path: Path, provider_url: str) -> None:
     current = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     # ponytail: replace only our owned table; add a TOML writer only if nested edits become necessary.
     pattern = re.compile(rf"(?ms)^\[{re.escape(section)}\]\r?\n.*?(?=^\[|\Z)")
-    updated = pattern.sub(block + "\n\n", current, count=1) if pattern.search(current) else current.rstrip() + "\n\n" + block + "\n"
+    legacy = re.compile(r'(?ms)^\[model\."grok-4\.5"\]\r?\n.*?(?=^\[|\Z)')
+    updated = legacy.sub("", current, count=1)
+    updated = pattern.sub(block + "\n\n", updated, count=1) if pattern.search(updated) else updated.rstrip() + "\n\n" + block + "\n"
+    models = re.compile(r"(?ms)(^\[models\]\r?\n)(.*?)(?=^\[|\Z)")
+    default = re.compile(r"(?m)^default\s*=.*$")
+    if models.search(updated):
+        updated = models.sub(
+            lambda match: match.group(1)
+            + (default.sub(f'default = "{model_id}"', match.group(2), count=1)
+               if default.search(match.group(2))
+               else f'default = "{model_id}"\n' + match.group(2)),
+            updated,
+            count=1,
+        )
+    else:
+        updated = f'[models]\ndefault = "{model_id}"\n\n' + updated.lstrip()
     if updated != current:
         temp = config_path.with_suffix(config_path.suffix + ".tmp")
         temp.write_text(updated, encoding="utf-8")
